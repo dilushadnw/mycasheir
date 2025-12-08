@@ -279,6 +279,65 @@ function updateCart() {
 
 document.getElementById("cashTendered").oninput = updateCart;
 
+// Clear cart function
+window.clearCart = () => {
+  if (cart.length === 0) return;
+  if (confirm(`Clear all ${cart.length} items from cart?`)) {
+    cart = [];
+    updateCart();
+    beep();
+  }
+};
+
+// Help modal functions
+window.showHelp = () => {
+  document.getElementById("helpModal").classList.remove("hidden");
+};
+
+window.closeHelp = () => {
+  document.getElementById("helpModal").classList.add("hidden");
+};
+
+// Keyboard shortcuts
+document.addEventListener("keydown", (e) => {
+  // F1 - Show help
+  if (e.key === "F1") {
+    e.preventDefault();
+    window.showHelp();
+  }
+  
+  // F2 - Focus cash tendered input
+  if (e.key === "F2") {
+    e.preventDefault();
+    document.getElementById("cashTendered").focus();
+    document.getElementById("cashTendered").select();
+  }
+  
+  // F9 or Ctrl+Enter - Complete sale
+  if (e.key === "F9" || (e.ctrlKey && e.key === "Enter")) {
+    e.preventDefault();
+    if (cart.length > 0) {
+      window.completeSale();
+    }
+  }
+  
+  // Escape - Clear search and refocus
+  if (e.key === "Escape") {
+    const searchInput = document.getElementById("search");
+    searchInput.value = "";
+    searchInput.focus();
+    // Reset product display filter
+    document.querySelectorAll("#productsGrid > div").forEach(card => card.style.display = "block");
+  }
+  
+  // Ctrl+K - Focus search
+  if (e.ctrlKey && e.key === "k") {
+    e.preventDefault();
+    document.getElementById("search").focus();
+    document.getElementById("search").select();
+  }
+});
+
 window.completeSale = async () => {
   if (cart.length === 0) {
     alert("Cart is empty! Please add items to cart.");
