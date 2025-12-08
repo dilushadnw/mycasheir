@@ -1,22 +1,314 @@
-<!DOCTYPE html><html><head><title>Report</title><script src="https://cdn.tailwindcss.com"></script></head>
-<body class="bg-gray-100 p-10">
-<h1 class="text-4xl font-bold mb-8">Today's Sales Report</h1>
-<div id="report" class="bg-white p-8 rounded-xl shadow"></div>
-<script type="module">
-import { db } from "./firebase-config.js";
-import { collection, query, where, onSnapshot } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore.js";
+<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Sales Reports</title><script src="https://cdn.tailwindcss.com"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet"><script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script></head>
+<body class="bg-gray-100 p-6 md:p-10">
+<div class="max-w-7xl mx-auto">
+  <div class="flex justify-between items-center mb-8">
+    <h1 class="text-3xl md:text-4xl font-bold text-indigo-700">Sales Reports</h1>
+    <a href="index.html" class="bg-indigo-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-indigo-700"><i class="fas fa-arrow-left mr-2"></i>Back to POS</a>
+  </div>
 
-const today = new Date().toISOString().slice(0,10);
-onSnapshot(query(collection(db, "sales"), where("timestamp", ">=", today)), snap => {
-  let total = 0;
-  const div = document.getElementById("report");
-  div.innerHTML = "<h2 class='text-2xl font-bold mb-4'>Sales Today</h2>";
-  snap.forEach(s => {
-    const data = s.data();
-    total += data.total;
-    div.innerHTML += `<div class="border-b py-3">₹${data.total.toFixed(2)} - ${new Date(data.timestamp?.toDate()).toLocaleString()}</div>`;
-  });
-  div.innerHTML += `<div class="text-3xl font-bold text-green-600 mt-6">TOTAL TODAY: ₹${total.toFixed(2)}</div>`;
+  <!-- Date Filter -->
+  <div class="bg-white p-6 rounded-2xl shadow-xl mb-6">
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+      <div>
+        <label class="block text-sm font-bold mb-2">Report Type</label>
+        <select id="reportType" class="w-full p-3 border-2 rounded-xl text-lg">
+          <option value="today">Today</option>
+          <option value="yesterday">Yesterday</option>
+          <option value="week">This Week</option>
+          <option value="month">This Month</option>
+          <option value="custom">Custom Range</option>
+        </select>
+      </div>
+      <div id="customDateDiv" class="hidden">
+        <label class="block text-sm font-bold mb-2">Start Date</label>
+        <input type="date" id="startDate" class="w-full p-3 border-2 rounded-xl text-lg"/>
+      </div>
+      <div id="customDateDiv2" class="hidden">
+        <label class="block text-sm font-bold mb-2">End Date</label>
+        <input type="date" id="endDate" class="w-full p-3 border-2 rounded-xl text-lg"/>
+      </div>
+      <button onclick="loadReport()" class="bg-indigo-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-indigo-700">
+        <i class="fas fa-search mr-2"></i>Generate Report
+      </button>
+    </div>
+  </div>
+
+  <!-- Summary Cards -->
+  <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+    <div class="bg-gradient-to-br from-green-500 to-green-600 text-white p-6 rounded-2xl shadow-xl">
+      <div class="text-lg opacity-90">Total Sales</div>
+      <div class="text-4xl font-bold" id="totalSales">₹0.00</div>
+    </div>
+    <div class="bg-gradient-to-br from-blue-500 to-blue-600 text-white p-6 rounded-2xl shadow-xl">
+      <div class="text-lg opacity-90">Transactions</div>
+      <div class="text-4xl font-bold" id="totalTransactions">0</div>
+    </div>
+    <div class="bg-gradient-to-br from-purple-500 to-purple-600 text-white p-6 rounded-2xl shadow-xl">
+      <div class="text-lg opacity-90">Avg. Sale</div>
+      <div class="text-4xl font-bold" id="avgSale">₹0.00</div>
+    </div>
+    <div class="bg-gradient-to-br from-orange-500 to-orange-600 text-white p-6 rounded-2xl shadow-xl">
+      <div class="text-lg opacity-90">Items Sold</div>
+      <div class="text-4xl font-bold" id="itemsSold">0</div>
+    </div>
+  </div>
+
+  <!-- Export Buttons -->
+  <div class="flex gap-4 mb-6">
+    <button onclick="exportPDF()" class="bg-red-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-red-700">
+      <i class="fas fa-file-pdf mr-2"></i>Export PDF
+    </button>
+    <button onclick="exportExcel()" class="bg-green-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-green-700">
+      <i class="fas fa-file-excel mr-2"></i>Export Excel
+    </button>
+  </div>
+
+  <!-- Sales List -->
+  <div class="bg-white p-6 rounded-2xl shadow-xl mb-6">
+    <h2 class="text-2xl font-bold mb-4">Transaction History</h2>
+    <div id="salesList" class="space-y-3"></div>
+  </div>
+
+  <!-- Most Sold Items -->
+  <div class="bg-white p-6 rounded-2xl shadow-xl">
+    <h2 class="text-2xl font-bold mb-4">Most Sold Items</h2>
+    <div id="topItems" class="space-y-3"></div>
+  </div>
+</div>
+
+<script type="module">
+import { db, auth } from "./firebase-config.js";
+import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-auth.js";
+import { collection, query, where, onSnapshot, Timestamp, orderBy, getDoc, doc } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore.js";
+
+let currentSales = [];
+let userRole = "cashier";
+
+// Check authentication
+onAuthStateChanged(auth, async user => {
+  if (!user) {
+    alert("Please login first!");
+    window.location.href = "index.html";
+    return;
+  }
+  
+  // Get user role
+  const userDoc = await getDoc(doc(db, "users", user.uid));
+  if (userDoc.exists()) {
+    userRole = userDoc.data().role || "cashier";
+  }
+  
+  // For cashiers, restrict to today only
+  if (userRole === "cashier") {
+    document.getElementById("reportType").value = "today";
+    document.getElementById("reportType").disabled = true;
+    document.getElementById("reportType").style.opacity = "0.5";
+    document.getElementById("reportType").title = "Cashiers can only view today's report";
+  }
+  
+  loadReport();
 });
+
+document.getElementById("reportType").addEventListener("change", (e) => {
+  const isCustom = e.target.value === "custom";
+  document.getElementById("customDateDiv").classList.toggle("hidden", !isCustom);
+  document.getElementById("customDateDiv2").classList.toggle("hidden", !isCustom);
+  if (!isCustom) loadReport();
+});
+
+function getDateRange(type) {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  
+  switch(type) {
+    case "today":
+      return { start: today, end: new Date() };
+    case "yesterday":
+      const yesterday = new Date(today);
+      yesterday.setDate(yesterday.getDate() - 1);
+      return { start: yesterday, end: today };
+    case "week":
+      const weekStart = new Date(today);
+      weekStart.setDate(weekStart.getDate() - 7);
+      return { start: weekStart, end: new Date() };
+    case "month":
+      const monthStart = new Date(today);
+      monthStart.setDate(monthStart.getDate() - 30);
+      return { start: monthStart, end: new Date() };
+    case "custom":
+      const startDate = document.getElementById("startDate").value;
+      const endDate = document.getElementById("endDate").value;
+      if (!startDate || !endDate) {
+        alert("Please select both start and end dates");
+        return null;
+      }
+      return { 
+        start: new Date(startDate + "T00:00:00"), 
+        end: new Date(endDate + "T23:59:59") 
+      };
+    default:
+      return { start: today, end: new Date() };
+  }
+}
+
+window.loadReport = () => {
+  const reportType = document.getElementById("reportType").value;
+  const dateRange = getDateRange(reportType);
+  
+  if (!dateRange) return;
+
+  const startTimestamp = Timestamp.fromDate(dateRange.start);
+  const endTimestamp = Timestamp.fromDate(dateRange.end);
+
+  const q = query(
+    collection(db, "sales"), 
+    where("timestamp", ">=", startTimestamp),
+    where("timestamp", "<=", endTimestamp),
+    orderBy("timestamp", "desc")
+  );
+
+  onSnapshot(q, snap => {
+    currentSales = [];
+    let totalRevenue = 0;
+    let totalItemsCount = 0;
+    const itemsSold = {};
+
+    snap.forEach(doc => {
+      const sale = doc.data();
+      sale.id = doc.id;
+      currentSales.push(sale);
+      totalRevenue += sale.total;
+      
+      sale.items.forEach(item => {
+        totalItemsCount += item.qty;
+        itemsSold[item.name] = (itemsSold[item.name] || 0) + item.qty;
+      });
+    });
+
+    // Update summary cards
+    document.getElementById("totalSales").textContent = `₹${totalRevenue.toFixed(2)}`;
+    document.getElementById("totalTransactions").textContent = currentSales.length;
+    document.getElementById("avgSale").textContent = currentSales.length > 0 
+      ? `₹${(totalRevenue / currentSales.length).toFixed(2)}` 
+      : "₹0.00";
+    document.getElementById("itemsSold").textContent = totalItemsCount;
+
+    // Display sales list
+    const salesList = document.getElementById("salesList");
+    salesList.innerHTML = "";
+    
+    if (currentSales.length === 0) {
+      salesList.innerHTML = "<p class='text-gray-500 text-center py-8'>No sales found for this period</p>";
+    } else {
+      currentSales.forEach(sale => {
+        const div = document.createElement("div");
+        div.className = "border-l-4 border-indigo-600 bg-gray-50 p-4 rounded-lg";
+        div.innerHTML = `
+          <div class="flex justify-between items-start">
+            <div>
+              <div class="font-bold text-lg">Transaction #${sale.id.slice(0,8).toUpperCase()}</div>
+              <div class="text-sm text-gray-600">${sale.timestamp ? new Date(sale.timestamp.toDate()).toLocaleString() : 'N/A'}</div>
+              <div class="mt-2">
+                ${sale.items.map(item => `<div class="text-sm">${item.name} × ${item.qty} = ₹${(item.price * item.qty).toFixed(2)}</div>`).join('')}
+              </div>
+            </div>
+            <div class="text-right">
+              <div class="text-2xl font-bold text-green-600">₹${sale.total.toFixed(2)}</div>
+              <div class="text-sm text-gray-600">Paid: ₹${sale.tendered.toFixed(2)}</div>
+              <div class="text-sm text-gray-600">Change: ₹${sale.change.toFixed(2)}</div>
+            </div>
+          </div>
+        `;
+        salesList.appendChild(div);
+      });
+    }
+
+    // Display top sold items
+    const topItems = document.getElementById("topItems");
+    topItems.innerHTML = "";
+    
+    const sortedItems = Object.entries(itemsSold).sort((a, b) => b[1] - a[1]).slice(0, 10);
+    
+    if (sortedItems.length === 0) {
+      topItems.innerHTML = "<p class='text-gray-500 text-center py-8'>No items sold in this period</p>";
+    } else {
+      sortedItems.forEach(([name, qty], index) => {
+        const div = document.createElement("div");
+        div.className = "flex justify-between items-center p-3 bg-gray-50 rounded-lg";
+        div.innerHTML = `
+          <div class="flex items-center gap-3">
+            <div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">${index + 1}</div>
+            <div class="font-bold">${name}</div>
+          </div>
+          <div class="text-xl font-bold text-indigo-600">${qty} units</div>
+        `;
+        topItems.appendChild(div);
+      });
+    }
+  });
+};
+
+window.exportPDF = () => {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  
+  doc.setFontSize(20);
+  doc.text("Sales Report", 105, 20, { align: "center" });
+  
+  doc.setFontSize(12);
+  const reportType = document.getElementById("reportType").value;
+  doc.text(`Report Type: ${reportType.toUpperCase()}`, 20, 35);
+  doc.text(`Generated: ${new Date().toLocaleString()}`, 20, 45);
+  
+  let y = 60;
+  doc.setFontSize(14);
+  doc.text("Summary:", 20, y);
+  y += 10;
+  
+  doc.setFontSize(11);
+  doc.text(`Total Sales: ${document.getElementById("totalSales").textContent}`, 25, y);
+  y += 7;
+  doc.text(`Total Transactions: ${document.getElementById("totalTransactions").textContent}`, 25, y);
+  y += 7;
+  doc.text(`Average Sale: ${document.getElementById("avgSale").textContent}`, 25, y);
+  y += 7;
+  doc.text(`Items Sold: ${document.getElementById("itemsSold").textContent}`, 25, y);
+  y += 15;
+  
+  doc.setFontSize(14);
+  doc.text("Transactions:", 20, y);
+  y += 10;
+  
+  doc.setFontSize(9);
+  currentSales.forEach((sale, index) => {
+    if (y > 270) {
+      doc.addPage();
+      y = 20;
+    }
+    doc.text(`#${sale.id.slice(0,8)} - ₹${sale.total.toFixed(2)} - ${sale.timestamp ? new Date(sale.timestamp.toDate()).toLocaleString() : 'N/A'}`, 25, y);
+    y += 6;
+  });
+  
+  doc.save(`sales-report-${new Date().toISOString().split('T')[0]}.pdf`);
+};
+
+window.exportExcel = () => {
+  const data = currentSales.map(sale => ({
+    'Transaction ID': sale.id.slice(0,8).toUpperCase(),
+    'Date': sale.timestamp ? new Date(sale.timestamp.toDate()).toLocaleString() : 'N/A',
+    'Total': sale.total.toFixed(2),
+    'Tendered': sale.tendered.toFixed(2),
+    'Change': sale.change.toFixed(2),
+    'Items': sale.items.map(i => `${i.name}(${i.qty})`).join(', ')
+  }));
+  
+  const ws = XLSX.utils.json_to_sheet(data);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Sales");
+  XLSX.writeFile(wb, `sales-report-${new Date().toISOString().split('T')[0]}.xlsx`);
+};
+
+// Load today's report by default
+loadReport();
 </script>
 </body></html>

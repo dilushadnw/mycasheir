@@ -1,49 +1,210 @@
-<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Products</title><script src="https://cdn.tailwindcss.com"></script></head>
-<body class="bg-gray-100 p-10">
-<h1 class="text-5xl font-bold mb-10 text-indigo-700">Manage Products</h1>
-<div class="max-w-4xl mx-auto bg-white p-10 rounded-3xl shadow-2xl">
-  <h2 class="text-3xl font-bold mb-6">Add New Product</h2>
-  <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-    <input id="name" placeholder="Product Name" class="p-4 border-2 rounded-xl text-xl"/>
-    <input id="price" type="number" placeholder="Price" class="p-4 border-2 rounded-xl text-xl"/>
-    <input id="stock" type="number" placeholder="Stock" class="p-4 border-2 rounded-xl text-xl"/>
+<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Products Management</title><script src="https://cdn.tailwindcss.com"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet"></head>
+<body class="bg-gray-100 p-6 md:p-10">
+<div class="max-w-7xl mx-auto">
+  <div class="flex justify-between items-center mb-10">
+    <h1 class="text-4xl md:text-5xl font-bold text-indigo-700">Manage Products</h1>
+    <a href="index.html" class="bg-indigo-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-indigo-700"><i class="fas fa-arrow-left mr-2"></i>Back to POS</a>
   </div>
-  <button onclick="addProduct()" class="bg-indigo-600 text-white px-12 py-6 rounded-xl text-2xl font-bold hover:bg-indigo-700">ADD PRODUCT</button>
+
+  <div class="max-w-4xl mx-auto bg-white p-8 md:p-10 rounded-3xl shadow-2xl mb-10">
+    <h2 class="text-2xl md:text-3xl font-bold mb-6">Add New Product</h2>
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+      <input id="name" placeholder="Product Name" class="p-4 border-2 rounded-xl text-xl" required/>
+      <input id="barcode" placeholder="Barcode (optional)" class="p-4 border-2 rounded-xl text-xl"/>
+      <input id="price" type="number" step="0.01" placeholder="Price" class="p-4 border-2 rounded-xl text-xl" required min="0"/>
+      <input id="stock" type="number" placeholder="Stock Quantity" class="p-4 border-2 rounded-xl text-xl" required min="0"/>
+    </div>
+    <button onclick="addProduct()" class="w-full bg-indigo-600 text-white px-12 py-5 rounded-xl text-xl md:text-2xl font-bold hover:bg-indigo-700">
+      <i class="fas fa-plus mr-2"></i>ADD PRODUCT
+    </button>
+  </div>
+
+  <div class="mb-6">
+    <input type="text" id="searchProducts" placeholder="Search products..." class="w-full p-4 border-2 rounded-xl text-xl">
+  </div>
+
+  <div id="list" class="grid gap-6 md:grid-cols-2 lg:grid-cols-3"></div>
 </div>
 
-<div id="list" class="mt-10 grid gap-6 md:grid-cols-2 lg:grid-cols-3"></div>
-
 <script type="module">
-import { db } from "./firebase-config.js";
-import { collection, addDoc, onSnapshot, doc, deleteDoc } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore.js";
+import { db, auth } from "./firebase-config.js";
+import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-auth.js";
+import { collection, addDoc, onSnapshot, doc, deleteDoc, updateDoc, increment, query, where, getDocs, getDoc } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore.js";
+
+// Check authentication and role
+onAuthStateChanged(auth, async user => {
+  if (!user) {
+    alert("Please login first!");
+    window.location.href = "index.html";
+    return;
+  }
+  
+  // Check if user is admin
+  const userDoc = await getDoc(doc(db, "users", user.uid));
+  if (!userDoc.exists() || userDoc.data().role !== "admin") {
+    alert("Access Denied! Only admins can manage products.");
+    window.location.href = "index.html";
+    return;
+  }
+});
+
+let allProducts = [];
 
 window.addProduct = async () => {
   const name = document.getElementById("name").value.trim();
+  const barcode = document.getElementById("barcode").value.trim();
   const price = parseFloat(document.getElementById("price").value);
   const stock = parseInt(document.getElementById("stock").value);
-  if (name && price > 0 && stock >= 0) {
-    await addDoc(collection(db, "products"), { name, price, stock });
+  
+  if (!name) return alert("Please enter product name");
+  if (isNaN(price) || price <= 0) return alert("Please enter valid price");
+  if (isNaN(stock) || stock < 0) return alert("Please enter valid stock quantity");
+
+  try {
+    // Check if product with same name or barcode already exists
+    const q = query(collection(db, "products"), where("name", "==", name));
+    const snapshot = await getDocs(q);
+    
+    if (!snapshot.empty) {
+      const existingDoc = snapshot.docs[0];
+      const existingData = existingDoc.data();
+      
+      if (confirm(`Product "${name}" already exists with stock: ${existingData.stock}.\n\nDo you want to ADD ${stock} units to the existing stock?`)) {
+        // Update existing product stock
+        await updateDoc(doc(db, "products", existingDoc.id), { 
+          stock: increment(stock),
+          price: price // Update price as well
+        });
+        alert(`Stock updated! New total: ${existingData.stock + stock} units`);
+      } else {
+        return;
+      }
+    } else {
+      // Add new product
+      await addDoc(collection(db, "products"), { 
+        name, 
+        barcode: barcode || "",
+        price, 
+        stock,
+        createdAt: new Date()
+      });
+      alert("Product added successfully!");
+    }
+    
+    // Clear form
     document.getElementById("name").value = "";
+    document.getElementById("barcode").value = "";
     document.getElementById("price").value = "";
     document.getElementById("stock").value = "";
+  } catch (error) {
+    alert("Error: " + error.message);
   }
 };
 
-onSnapshot(collection(db, "products"), snap => {
+window.updateStock = async (id, currentStock) => {
+  const newStock = prompt(`Current stock: ${currentStock}\n\nEnter stock quantity to ADD:`, "0");
+  if (newStock !== null) {
+    const stockToAdd = parseInt(newStock);
+    if (!isNaN(stockToAdd) && stockToAdd > 0) {
+      try {
+        await updateDoc(doc(db, "products", id), { stock: increment(stockToAdd) });
+        alert(`Stock updated! Added ${stockToAdd} units.`);
+      } catch (error) {
+        alert("Error updating stock: " + error.message);
+      }
+    }
+  }
+};
+
+window.editProduct = async (id, currentName, currentPrice, currentStock, currentBarcode) => {
+  const newName = prompt("Product Name:", currentName);
+  if (!newName) return;
+  
+  const newPrice = prompt("Price:", currentPrice);
+  if (!newPrice || isNaN(parseFloat(newPrice))) return;
+  
+  const newBarcode = prompt("Barcode (optional):", currentBarcode || "");
+  
+  try {
+    await updateDoc(doc(db, "products", id), { 
+      name: newName, 
+      price: parseFloat(newPrice),
+      barcode: newBarcode || ""
+    });
+    alert("Product updated successfully!");
+  } catch (error) {
+    alert("Error: " + error.message);
+  }
+};
+
+window.deleteProduct = async (id, name) => {
+  if (confirm(`Are you sure you want to delete "${name}"?`)) {
+    try {
+      await deleteDoc(doc(db, "products", id));
+      alert("Product deleted!");
+    } catch (error) {
+      alert("Error: " + error.message);
+    }
+  }
+};
+
+function renderProducts(products) {
   const list = document.getElementById("list");
   list.innerHTML = "";
-  snap.forEach(d => {
-    const p = d.data(); p.id = d.id;
+  
+  if (products.length === 0) {
+    list.innerHTML = "<p class='text-2xl text-gray-500 col-span-full text-center'>No products found</p>";
+    return;
+  }
+  
+  products.forEach(p => {
     const card = document.createElement("div");
-    card.className = "bg-white p-6 rounded-2xl shadow-xl";
+    card.className = `bg-white p-6 rounded-2xl shadow-xl ${p.stock <= 5 ? 'border-4 border-red-500' : ''}`;
     card.innerHTML = `
-      <h3 class="text-2xl font-bold">${p.name}</h3>
-      <p class="text-3xl font-bold text-green-600">₹${p.price}</p>
-      <p class="text-xl ${p.stock <= 5 ? 'text-red-600' : ''}">Stock: ${p.stock}</p>
-      <button onclick="deleteDoc(doc(db,'products','${p.id}'))" class="mt-4 bg-red-600 text-white px-6 py-3 rounded-xl">Delete</button>
+      <div class="flex justify-between items-start mb-4">
+        <div>
+          <h3 class="text-2xl font-bold">${p.name}</h3>
+          ${p.barcode ? `<p class="text-sm text-gray-500">Barcode: ${p.barcode}</p>` : ''}
+        </div>
+        <span class="text-xs bg-gray-200 px-2 py-1 rounded">#${p.id.slice(0,6)}</span>
+      </div>
+      <p class="text-3xl font-bold text-green-600">₹${p.price.toFixed(2)}</p>
+      <p class="text-xl font-bold mt-2 ${p.stock <= 5 ? 'text-red-600 animate-pulse' : p.stock <= 10 ? 'text-orange-600' : 'text-gray-700'}">
+        Stock: ${p.stock} ${p.stock <= 5 ? '⚠️ Low!' : ''}
+      </p>
+      <div class="mt-4 grid grid-cols-2 gap-2">
+        <button onclick="updateStock('${p.id}', ${p.stock})" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm font-bold">
+          <i class="fas fa-plus-circle mr-1"></i>Add Stock
+        </button>
+        <button onclick="editProduct('${p.id}', '${p.name.replace(/'/g, "\\'")}', ${p.price}, ${p.stock}, '${(p.barcode || "").replace(/'/g, "\\'")})" class="bg-yellow-600 text-white px-4 py-2 rounded-lg hover:bg-yellow-700 text-sm font-bold">
+          <i class="fas fa-edit mr-1"></i>Edit
+        </button>
+      </div>
+      <button onclick="deleteProduct('${p.id}', '${p.name.replace(/'/g, "\\'")})" class="mt-2 w-full bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 text-sm font-bold">
+        <i class="fas fa-trash mr-1"></i>Delete
+      </button>
     `;
     list.appendChild(card);
   });
+}
+
+onSnapshot(collection(db, "products"), snap => {
+  allProducts = [];
+  snap.forEach(d => {
+    const p = d.data(); 
+    p.id = d.id;
+    allProducts.push(p);
+  });
+  renderProducts(allProducts);
+});
+
+document.getElementById("searchProducts").addEventListener("input", (e) => {
+  const term = e.target.value.toLowerCase();
+  const filtered = allProducts.filter(p => 
+    p.name.toLowerCase().includes(term) || 
+    (p.barcode && p.barcode.toLowerCase().includes(term))
+  );
+  renderProducts(filtered);
 });
 </script>
 </body></html>
