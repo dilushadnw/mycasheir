@@ -160,30 +160,71 @@ function renderProducts(products) {
   products.forEach(p => {
     const card = document.createElement("div");
     card.className = `bg-white p-6 rounded-2xl shadow-xl ${p.stock <= 5 ? 'border-4 border-red-500' : ''}`;
-    card.innerHTML = `
-      <div class="flex justify-between items-start mb-4">
-        <div>
-          <h3 class="text-2xl font-bold">${p.name}</h3>
-          ${p.barcode ? `<p class="text-sm text-gray-500">Barcode: ${p.barcode}</p>` : ''}
-        </div>
-        <span class="text-xs bg-gray-200 px-2 py-1 rounded">#${p.id.slice(0,6)}</span>
-      </div>
-      <p class="text-3xl font-bold text-green-600">₹${p.price.toFixed(2)}</p>
-      <p class="text-xl font-bold mt-2 ${p.stock <= 5 ? 'text-red-600 animate-pulse' : p.stock <= 10 ? 'text-orange-600' : 'text-gray-700'}">
-        Stock: ${p.stock} ${p.stock <= 5 ? '⚠️ Low!' : ''}
-      </p>
-      <div class="mt-4 grid grid-cols-2 gap-2">
-        <button onclick="updateStock('${p.id}', ${p.stock})" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm font-bold">
-          <i class="fas fa-plus-circle mr-1"></i>Add Stock
-        </button>
-        <button onclick="editProduct('${p.id}', '${p.name.replace(/'/g, "\\'")}', ${p.price}, ${p.stock}, '${(p.barcode || "").replace(/'/g, "\\'")})" class="bg-yellow-600 text-white px-4 py-2 rounded-lg hover:bg-yellow-700 text-sm font-bold">
-          <i class="fas fa-edit mr-1"></i>Edit
-        </button>
-      </div>
-      <button onclick="deleteProduct('${p.id}', '${p.name.replace(/'/g, "\\'")})" class="mt-2 w-full bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 text-sm font-bold">
-        <i class="fas fa-trash mr-1"></i>Delete
-      </button>
-    `;
+    
+    // Create elements to avoid innerHTML with user data
+    const headerDiv = document.createElement("div");
+    headerDiv.className = "flex justify-between items-start mb-4";
+    
+    const titleDiv = document.createElement("div");
+    const title = document.createElement("h3");
+    title.className = "text-2xl font-bold";
+    title.textContent = p.name; // Safe: uses textContent
+    titleDiv.appendChild(title);
+    
+    if (p.barcode) {
+      const barcodeP = document.createElement("p");
+      barcodeP.className = "text-sm text-gray-500";
+      barcodeP.textContent = `Barcode: ${p.barcode}`; // Safe: uses textContent
+      titleDiv.appendChild(barcodeP);
+    }
+    
+    const idSpan = document.createElement("span");
+    idSpan.className = "text-xs bg-gray-200 px-2 py-1 rounded";
+    idSpan.textContent = `#${p.id.slice(0,6)}`;
+    
+    headerDiv.appendChild(titleDiv);
+    headerDiv.appendChild(idSpan);
+    card.appendChild(headerDiv);
+    
+    // Price
+    const priceP = document.createElement("p");
+    priceP.className = "text-3xl font-bold text-green-600";
+    priceP.textContent = `₹${p.price.toFixed(2)}`;
+    card.appendChild(priceP);
+    
+    // Stock
+    const stockP = document.createElement("p");
+    stockP.className = `text-xl font-bold mt-2 ${p.stock <= 5 ? 'text-red-600 animate-pulse' : p.stock <= 10 ? 'text-orange-600' : 'text-gray-700'}`;
+    stockP.textContent = `Stock: ${p.stock}${p.stock <= 5 ? ' ⚠️ Low!' : ''}`;
+    card.appendChild(stockP);
+    
+    // Buttons container
+    const buttonsDiv = document.createElement("div");
+    buttonsDiv.className = "mt-4 grid grid-cols-2 gap-2";
+    
+    // Add Stock button
+    const addStockBtn = document.createElement("button");
+    addStockBtn.className = "bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm font-bold";
+    addStockBtn.innerHTML = '<i class="fas fa-plus-circle mr-1"></i>Add Stock';
+    addStockBtn.onclick = () => updateStock(p.id, p.stock);
+    buttonsDiv.appendChild(addStockBtn);
+    
+    // Edit button
+    const editBtn = document.createElement("button");
+    editBtn.className = "bg-yellow-600 text-white px-4 py-2 rounded-lg hover:bg-yellow-700 text-sm font-bold";
+    editBtn.innerHTML = '<i class="fas fa-edit mr-1"></i>Edit';
+    editBtn.onclick = () => editProduct(p.id, p.name, p.price, p.stock, p.barcode || "");
+    buttonsDiv.appendChild(editBtn);
+    
+    card.appendChild(buttonsDiv);
+    
+    // Delete button
+    const deleteBtn = document.createElement("button");
+    deleteBtn.className = "mt-2 w-full bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 text-sm font-bold";
+    deleteBtn.innerHTML = '<i class="fas fa-trash mr-1"></i>Delete';
+    deleteBtn.onclick = () => deleteProduct(p.id, p.name);
+    card.appendChild(deleteBtn);
+    
     list.appendChild(card);
   });
 }
