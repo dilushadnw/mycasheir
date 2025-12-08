@@ -4,7 +4,7 @@ export function beep() {
 }
 
 // Format currency in LKR format
-function formatLKR(amount) {
+export function formatLKR(amount) {
   return new Intl.NumberFormat('en-LK', {
     style: 'currency',
     currency: 'LKR',
@@ -65,13 +65,4 @@ export function printReceipt(data, settings) {
 </body></html>`);
   win.document.close();
   setTimeout(() => win.print(), 600);
-}
-
-// Helper function to be used in receipt generation
-function formatLKR(amount) {
-  return new Intl.NumberFormat('en-LK', {
-    style: 'currency',
-    currency: 'LKR',
-    minimumFractionDigits: 2
-  }).format(amount);
 }

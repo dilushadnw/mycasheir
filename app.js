@@ -2,7 +2,7 @@
 import { auth, db } from "./firebase-config.js";
 import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-auth.js";
 import { collection, doc, onSnapshot, addDoc, updateDoc, query, where, orderBy, serverTimestamp, increment, setDoc, getDoc, getDocs } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore.js";
-import { beep, printReceipt } from "./utils.js";
+import { beep, printReceipt, formatLKR } from "./utils.js";
 
 let cart = [];
 let settings = { shopName: "My Shop", address: "Your Address", taxRate: 0, currency: "LKR" };
@@ -385,7 +385,7 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
-// Generate sequential transaction ID: TXN20251208-001
+// Transaction ID generator
 async function generateTransactionId() {
   const today = new Date();
   const dateStr = today.getFullYear() + 
@@ -415,15 +415,6 @@ async function generateTransactionId() {
   }
 }
 
-// Format currency in LKR format
-function formatLKR(amount) {
-  return new Intl.NumberFormat('en-LK', {
-    style: 'currency',
-    currency: 'LKR',
-    minimumFractionDigits: 2
-  }).format(amount);
-}
-
 window.completeSale = async () => {
   // Prevent duplicate transactions
   if (isProcessingSale) {
@@ -437,8 +428,8 @@ window.completeSale = async () => {
     return;
   }
 
-  // Get total and validate data
-  const totalText = document.getElementById("total").textContent.replace(/[^\d.]/g, "");
+  // Get total and validate data (remove all non-numeric except first decimal point)
+  const totalText = document.getElementById("total").textContent.replace(/[^\d.-]/g, "").replace(/\.(?=.*\.)/g, "");
   const total = parseFloat(totalText);
   
   if (isNaN(total) || total <= 0) {
