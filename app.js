@@ -45,6 +45,11 @@ window.logout = () => {
   }
 };
 
+window.toggleSetupInstructions = () => {
+  const instructions = document.getElementById("setupInstructions");
+  instructions.classList.toggle("hidden");
+};
+
 async function getUserRole(userId) {
   try {
     const userDoc = await getDoc(doc(db, "users", userId));
