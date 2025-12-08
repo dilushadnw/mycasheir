@@ -1,13 +1,15 @@
 // app.js
 import { auth, db } from "./firebase-config.js";
 import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-auth.js";
-import { collection, doc, onSnapshot, addDoc, updateDoc, query, orderBy, serverTimestamp, increment, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore.js";
+import { collection, doc, onSnapshot, addDoc, updateDoc, query, where, orderBy, serverTimestamp, increment, setDoc, getDoc, getDocs } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore.js";
 import { beep, printReceipt } from "./utils.js";
 
 let cart = [];
-let settings = { shopName: "My Shop", address: "Your Address", taxRate: 0, currency: "₹" };
+let settings = { shopName: "My Shop", address: "Your Address", taxRate: 0, currency: "LKR" };
 let currentUser = null;
 let userRole = "cashier"; // default role
+let isProcessingSale = false; // Prevent duplicate transactions
+let productsCache = []; // Cache for faster search
 
 window.login = async () => {
   const email = document.getElementById("email").value.trim();
@@ -99,19 +101,36 @@ function loadSettings() {
 }
 
 function loadProducts() {
+  const searchInput = document.getElementById("search");
+  let searchListener = null;
+  let enterListener = null;
+  
   onSnapshot(query(collection(db, "products"), orderBy("name")), snap => {
     const grid = document.getElementById("productsGrid");
-    grid.innerHTML = "";
+    
+    // Clear cache and rebuild
+    productsCache = [];
+    const fragment = document.createDocumentFragment(); // Use fragment for better performance
+    
     snap.forEach(d => {
       const p = d.data(); 
       p.id = d.id;
-
+      productsCache.push(p); // Cache products for search
+      
       const div = document.createElement("div");
       div.className = `bg-white p-8 rounded-3xl shadow-2xl text-center cursor-pointer hover:scale-110 transition-all duration-200 ${p.stock <= 5 ? 'border-8 border-red-500 animate-pulse' : 'border-4 border-transparent'}`;
+      div.dataset.productId = p.id;
+      div.dataset.productName = (p.name || "").toLowerCase();
+      div.dataset.productBarcode = (p.barcode || "").toLowerCase();
+      div.dataset.productCategory = (p.category || "").toLowerCase();
       
-      // THIS IS THE FIX → use onclick on the main div + prevent event bubbling
       div.onclick = (e) => {
-        e.stopPropagation();  // prevents issues
+        e.stopPropagation();
+        if (p.stock <= 0) {
+          alert(`${p.name} is out of stock!`);
+          beep(); beep();
+          return;
+        }
         beep();
         const existing = cart.find(i => i.id === p.id);
         if (existing) existing.qty += 1;
@@ -121,75 +140,98 @@ function loadProducts() {
 
       div.innerHTML = `
         <div class="text-2xl font-bold text-gray-800 mb-2">${p.name}</div>
-        <div class="text-4xl font-bold text-green-600">${settings.currency}${p.price}</div>
+        <div class="text-4xl font-bold text-green-600">${formatLKR(p.price)}</div>
         <div class="text-xl mt-3 ${p.stock <= 5 ? 'text-red-600 font-bold' : 'text-gray-600'}">
           Stock: ${p.stock}
         </div>
+        ${p.category ? `<div class="text-sm text-gray-500 mt-1">${p.category}</div>` : ''}
       `;
 
-      grid.appendChild(div);
+      fragment.appendChild(div);
     });
-  });
-
-  // Search and barcode scanner functionality
-  const searchInput = document.getElementById("search");
-  let allProductsList = [];
-  
-  snap.forEach(d => {
-    const p = d.data(); 
-    p.id = d.id;
-    allProductsList.push(p);
-  });
-  
-  // Live search filter
-  searchInput.addEventListener("input", e => {
-    const term = e.target.value.trim().toLowerCase();
-    if (!term) {
-      document.querySelectorAll("#productsGrid > div").forEach(card => card.style.display = "block");
-      return;
-    }
     
-    document.querySelectorAll("#productsGrid > div").forEach(card => {
-      const text = card.textContent.toLowerCase();
-      card.style.display = text.includes(term) ? "block" : "none";
-    });
-  });
-  
-  // Barcode scanner (Enter key)
-  searchInput.addEventListener("keypress", e => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      const term = e.target.value.trim().toLowerCase();
-      
-      if (!term) return;
-      
-      // Find product by barcode or name
-      const foundProduct = allProductsList.find(p => 
-        (p.barcode && p.barcode.toLowerCase() === term) ||
-        p.name.toLowerCase().includes(term)
-      );
-      
-      if (foundProduct) {
-        if (foundProduct.stock <= 0) {
-          alert(`${foundProduct.name} is out of stock!`);
-          beep(); beep();
+    grid.innerHTML = "";
+    grid.appendChild(fragment);
+    
+    // Remove old listeners to prevent duplicates
+    if (searchListener) searchInput.removeEventListener("input", searchListener);
+    if (enterListener) searchInput.removeEventListener("keypress", enterListener);
+    
+    // Optimized search with debouncing
+    let searchTimeout;
+    searchListener = (e) => {
+      clearTimeout(searchTimeout);
+      searchTimeout = setTimeout(() => {
+        const term = e.target.value.trim().toLowerCase();
+        if (!term) {
+          document.querySelectorAll("#productsGrid > div").forEach(card => card.style.display = "block");
           return;
         }
         
-        beep();
-        const existing = cart.find(i => i.id === foundProduct.id);
-        if (existing) existing.qty += 1;
-        else cart.push({ ...foundProduct, qty: 1 });
-        updateCart();
-        e.target.value = "";
+        // Fast search using dataset attributes
+        document.querySelectorAll("#productsGrid > div").forEach(card => {
+          const matchesName = card.dataset.productName.includes(term);
+          const matchesBarcode = card.dataset.productBarcode.includes(term);
+          const matchesCategory = card.dataset.productCategory.includes(term);
+          card.style.display = (matchesName || matchesBarcode || matchesCategory) ? "block" : "none";
+        });
+      }, 150); // 150ms debounce for responsive feel
+    };
+    
+    // High-speed barcode scanner (Enter key)
+    enterListener = (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        const term = e.target.value.trim().toLowerCase();
         
-        // Reset search filter
-        document.querySelectorAll("#productsGrid > div").forEach(card => card.style.display = "block");
-      } else {
-        alert("Product not found!");
-        beep(); beep();
+        if (!term) return;
+        
+        // Optimized search from cache - search barcode first (exact match), then name
+        let foundProduct = productsCache.find(p => 
+          p.barcode && p.barcode.toLowerCase() === term
+        );
+        
+        if (!foundProduct) {
+          foundProduct = productsCache.find(p => 
+            p.name.toLowerCase().includes(term)
+          );
+        }
+        
+        if (!foundProduct && term) {
+          foundProduct = productsCache.find(p => 
+            (p.category || "").toLowerCase().includes(term)
+          );
+        }
+        
+        if (foundProduct) {
+          if (foundProduct.stock <= 0) {
+            alert(`${foundProduct.name} is out of stock!`);
+            beep(); beep();
+            e.target.value = "";
+            return;
+          }
+          
+          beep();
+          const existing = cart.find(i => i.id === foundProduct.id);
+          if (existing) existing.qty += 1;
+          else cart.push({ ...foundProduct, qty: 1 });
+          updateCart();
+          e.target.value = "";
+          
+          // Reset search filter
+          document.querySelectorAll("#productsGrid > div").forEach(card => card.style.display = "block");
+        } else {
+          alert("Product not found!");
+          beep(); beep();
+        }
       }
-    }
+    };
+    
+    searchInput.addEventListener("input", searchListener);
+    searchInput.addEventListener("keypress", enterListener);
+    
+    // Auto-focus search input for barcode scanner
+    searchInput.focus();
   });
 }
   
@@ -215,7 +257,7 @@ function updateCart() {
     div.innerHTML = `
       <div class="flex-1">
         <div class="font-bold text-xl">${item.name}</div>
-        <div class="text-gray-600">${settings.currency}${item.price} each</div>
+        <div class="text-gray-600">${formatLKR(item.price)} each</div>
       </div>
       <div class="flex flex-col items-center gap-2">
         <div class="flex gap-2 items-center">
@@ -223,7 +265,7 @@ function updateCart() {
           <input type="number" class="qty-input w-20 text-center border-2 rounded-lg text-xl font-bold p-1" value="${item.qty}" min="1" data-index="${i}"/>
           <button class="qty-plus bg-green-600 text-white w-10 h-10 rounded-full text-2xl hover:bg-green-700 font-bold" data-index="${i}">+</button>
         </div>
-        <div class="text-xl font-bold text-green-600">${settings.currency}${(item.price * item.qty).toFixed(2)}</div>
+        <div class="text-xl font-bold text-green-600">${formatLKR(item.price * item.qty)}</div>
       </div>
       <button class="remove-item bg-red-500 text-white px-4 py-2 rounded-lg hover:bg-red-600 font-bold" data-index="${i}">
         <i class="fas fa-trash"></i>
@@ -275,11 +317,11 @@ function updateCart() {
     });
   });
 
-  document.getElementById("total").textContent = settings.currency + total.toFixed(2);
+  document.getElementById("total").textContent = formatLKR(total);
   document.getElementById("cartCount").textContent = cart.reduce((s,i)=>s+i.qty,0);
 
   const tendered = parseFloat(document.getElementById("cashTendered").value) || 0;
-  document.getElementById("change").textContent = settings.currency + (tendered - total).toFixed(2);
+  document.getElementById("change").textContent = formatLKR(tendered - total);
 }
 
 document.getElementById("cashTendered").oninput = updateCart;
@@ -343,78 +385,131 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
+// Generate sequential transaction ID: TXN20251208-001
+async function generateTransactionId() {
+  const today = new Date();
+  const dateStr = today.getFullYear() + 
+                  String(today.getMonth() + 1).padStart(2, '0') + 
+                  String(today.getDate()).padStart(2, '0');
+  
+  // Get today's transaction count from Firestore
+  try {
+    const todayStart = new Date(today.setHours(0, 0, 0, 0));
+    const todayEnd = new Date(today.setHours(23, 59, 59, 999));
+    
+    const salesQuery = query(
+      collection(db, "sales"),
+      where("timestamp", ">=", todayStart),
+      where("timestamp", "<=", todayEnd)
+    );
+    
+    const snapshot = await getDocs(salesQuery);
+    const count = snapshot.size + 1;
+    const seqNum = String(count).padStart(3, '0');
+    
+    return `TXN${dateStr}-${seqNum}`;
+  } catch (error) {
+    // Fallback if query fails
+    const fallbackSeq = String(Math.floor(Math.random() * 999) + 1).padStart(3, '0');
+    return `TXN${dateStr}-${fallbackSeq}`;
+  }
+}
+
+// Format currency in LKR format
+function formatLKR(amount) {
+  return new Intl.NumberFormat('en-LK', {
+    style: 'currency',
+    currency: 'LKR',
+    minimumFractionDigits: 2
+  }).format(amount);
+}
+
 window.completeSale = async () => {
+  // Prevent duplicate transactions
+  if (isProcessingSale) {
+    console.log("Sale already in progress");
+    return;
+  }
+  
+  // Empty cart validation
   if (cart.length === 0) {
     alert("Cart is empty! Please add items to cart.");
     return;
   }
 
-  const total = parseFloat(document.getElementById("total").textContent.replace(settings.currency, ""));
+  // Get total and validate data
+  const totalText = document.getElementById("total").textContent.replace(/[^\d.]/g, "");
+  const total = parseFloat(totalText);
+  
+  if (isNaN(total) || total <= 0) {
+    alert("Invalid total amount!");
+    return;
+  }
+  
   const tendered = parseFloat(document.getElementById("cashTendered").value) || 0;
   
   if (tendered < total) {
-    alert(`Insufficient payment!\nTotal: ${settings.currency}${total.toFixed(2)}\nTendered: ${settings.currency}${tendered.toFixed(2)}\nShortfall: ${settings.currency}${(total - tendered).toFixed(2)}`);
+    alert(`Insufficient payment!\nTotal: ${formatLKR(total)}\nTendered: ${formatLKR(tendered)}\nShortfall: ${formatLKR(total - tendered)}`);
     return;
   }
 
-  // Check stock availability
-  for (const item of cart) {
-    const productDoc = await getDoc(doc(db, "products", item.id));
-    if (!productDoc.exists()) {
-      alert(`Error: Product ${item.name} not found!`);
-      return;
-    }
-    const currentStock = productDoc.data().stock;
-    if (currentStock < item.qty) {
-      alert(`Insufficient stock for ${item.name}!\nRequested: ${item.qty}, Available: ${currentStock}`);
-      return;
-    }
+  // Disable button and set processing flag
+  isProcessingSale = true;
+  const completeBtn = document.querySelector('button[onclick="completeSale()"]');
+  if (completeBtn) {
+    completeBtn.disabled = true;
+    completeBtn.style.opacity = "0.5";
+    completeBtn.textContent = "Processing...";
   }
 
   try {
-    // Generate unique transaction ID using crypto API or fallback
-    let transactionId;
-    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
-      // Use crypto.randomUUID for better uniqueness
-      transactionId = `TXN-${crypto.randomUUID()}`;
-    } else {
-      // Fallback for older browsers - use timestamp + random + counter
-      const timestamp = Date.now();
-      const random = Math.floor(Math.random() * 1000000);
-      const counter = (window.txnCounter = (window.txnCounter || 0) + 1);
-      transactionId = `TXN-${timestamp}-${random}-${counter}`;
+    // Check stock availability
+    for (const item of cart) {
+      const productDoc = await getDoc(doc(db, "products", item.id));
+      if (!productDoc.exists()) {
+        throw new Error(`Product ${item.name} not found!`);
+      }
+      const currentStock = productDoc.data().stock;
+      if (currentStock < item.qty) {
+        throw new Error(`Insufficient stock for ${item.name}!\nRequested: ${item.qty}, Available: ${currentStock}`);
+      }
     }
+
+    // Generate sequential transaction ID
+    const transactionId = await generateTransactionId();
     
-    // Deduct stock
+    // Deduct stock atomically
     for (const item of cart) {
       await updateDoc(doc(db, "products", item.id), { 
         stock: increment(-item.qty) 
       });
     }
 
-    // Save sale
+    // Save sale with user tracking
     const sale = {
       transactionId,
       items: cart.map(i => ({ 
         name: i.name, 
         price: i.price, 
         qty: i.qty,
-        productId: i.id 
+        productId: i.id,
+        category: i.category || "Uncategorized"
       })),
       total, 
       tendered, 
       change: tendered - total,
       paymentMethod: "Cash",
       timestamp: serverTimestamp(),
-      userId: currentUser?.uid || "unknown",
-      userEmail: currentUser?.email || "unknown"
+      userId: currentUser?.uid || "guest",
+      userEmail: currentUser?.email || "guest",
+      userName: currentUser?.displayName || currentUser?.email || "Guest User"
     };
     
     await addDoc(collection(db, "sales"), sale);
 
     printReceipt({ ...sale, transactionId }, settings);
     
-    alert(`Sale completed successfully!\nTransaction ID: ${transactionId}\nChange: ${settings.currency}${(tendered - total).toFixed(2)}`);
+    alert(`Sale completed successfully!\nTransaction ID: ${transactionId}\nChange: ${formatLKR(tendered - total)}`);
     
     cart = [];
     document.getElementById("cashTendered").value = "";
@@ -423,5 +518,13 @@ window.completeSale = async () => {
   } catch (error) {
     alert("Error completing sale: " + error.message);
     console.error("Sale error:", error);
+  } finally {
+    // Re-enable button
+    isProcessingSale = false;
+    if (completeBtn) {
+      completeBtn.disabled = false;
+      completeBtn.style.opacity = "1";
+      completeBtn.innerHTML = '<i class="fas fa-check-circle mr-3"></i>COMPLETE SALE<div class="text-sm font-normal mt-2 opacity-75">(Press F9 or Ctrl+Enter)</div>';
+    }
   }
 };

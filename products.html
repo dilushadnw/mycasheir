@@ -8,10 +8,11 @@
 
   <div class="max-w-4xl mx-auto bg-white p-8 md:p-10 rounded-3xl shadow-2xl mb-10">
     <h2 class="text-2xl md:text-3xl font-bold mb-6">Add New Product</h2>
-    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+    <div class="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
       <input id="name" placeholder="Product Name" class="p-4 border-2 rounded-xl text-xl" required/>
       <input id="barcode" placeholder="Barcode (optional)" class="p-4 border-2 rounded-xl text-xl"/>
-      <input id="price" type="number" step="0.01" placeholder="Price" class="p-4 border-2 rounded-xl text-xl" required min="0"/>
+      <input id="category" placeholder="Category (optional)" class="p-4 border-2 rounded-xl text-xl"/>
+      <input id="price" type="number" step="0.01" placeholder="Price (LKR)" class="p-4 border-2 rounded-xl text-xl" required min="0"/>
       <input id="stock" type="number" placeholder="Stock Quantity" class="p-4 border-2 rounded-xl text-xl" required min="0"/>
     </div>
     <button onclick="addProduct()" class="w-full bg-indigo-600 text-white px-12 py-5 rounded-xl text-xl md:text-2xl font-bold hover:bg-indigo-700">
@@ -53,11 +54,12 @@ let allProducts = [];
 window.addProduct = async () => {
   const name = document.getElementById("name").value.trim();
   const barcode = document.getElementById("barcode").value.trim();
+  const category = document.getElementById("category").value.trim();
   const price = parseFloat(document.getElementById("price").value);
   const stock = parseInt(document.getElementById("stock").value);
   
   if (!name) return alert("Please enter product name");
-  if (isNaN(price) || price <= 0) return alert("Please enter valid price");
+  if (isNaN(price) || price <= 0) return alert("Please enter valid price (LKR)");
   if (isNaN(stock) || stock < 0) return alert("Please enter valid stock quantity");
 
   try {
@@ -73,7 +75,8 @@ window.addProduct = async () => {
         // Update existing product stock
         await updateDoc(doc(db, "products", existingDoc.id), { 
           stock: increment(stock),
-          price: price // Update price as well
+          price: price, // Update price as well
+          category: category || existingData.category || ""
         });
         alert(`Stock updated! New total: ${existingData.stock + stock} units`);
       } else {
@@ -84,6 +87,7 @@ window.addProduct = async () => {
       await addDoc(collection(db, "products"), { 
         name, 
         barcode: barcode || "",
+        category: category || "",
         price, 
         stock,
         createdAt: new Date()
@@ -94,6 +98,7 @@ window.addProduct = async () => {
     // Clear form
     document.getElementById("name").value = "";
     document.getElementById("barcode").value = "";
+    document.getElementById("category").value = "";
     document.getElementById("price").value = "";
     document.getElementById("stock").value = "";
   } catch (error) {

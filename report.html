@@ -37,7 +37,7 @@
   <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
     <div class="bg-gradient-to-br from-green-500 to-green-600 text-white p-6 rounded-2xl shadow-xl">
       <div class="text-lg opacity-90">Total Sales</div>
-      <div class="text-4xl font-bold" id="totalSales">₹0.00</div>
+      <div class="text-4xl font-bold" id="totalSales">LKR 0.00</div>
     </div>
     <div class="bg-gradient-to-br from-blue-500 to-blue-600 text-white p-6 rounded-2xl shadow-xl">
       <div class="text-lg opacity-90">Transactions</div>
@@ -45,7 +45,7 @@
     </div>
     <div class="bg-gradient-to-br from-purple-500 to-purple-600 text-white p-6 rounded-2xl shadow-xl">
       <div class="text-lg opacity-90">Avg. Sale</div>
-      <div class="text-4xl font-bold" id="avgSale">₹0.00</div>
+      <div class="text-4xl font-bold" id="avgSale">LKR 0.00</div>
     </div>
     <div class="bg-gradient-to-br from-orange-500 to-orange-600 text-white p-6 rounded-2xl shadow-xl">
       <div class="text-lg opacity-90">Items Sold</div>
@@ -83,6 +83,15 @@ import { collection, query, where, onSnapshot, Timestamp, orderBy, getDoc, doc }
 
 let currentSales = [];
 let userRole = "cashier";
+
+// Format currency in LKR format
+function formatLKR(amount) {
+  return new Intl.NumberFormat('en-LK', {
+    style: 'currency',
+    currency: 'LKR',
+    minimumFractionDigits: 2
+  }).format(amount);
+}
 
 // Check authentication
 onAuthStateChanged(auth, async user => {
@@ -186,11 +195,11 @@ window.loadReport = () => {
     });
 
     // Update summary cards
-    document.getElementById("totalSales").textContent = `₹${totalRevenue.toFixed(2)}`;
+    document.getElementById("totalSales").textContent = formatLKR(totalRevenue);
     document.getElementById("totalTransactions").textContent = currentSales.length;
     document.getElementById("avgSale").textContent = currentSales.length > 0 
-      ? `₹${(totalRevenue / currentSales.length).toFixed(2)}` 
-      : "₹0.00";
+      ? formatLKR(totalRevenue / currentSales.length)
+      : formatLKR(0);
     document.getElementById("itemsSold").textContent = totalItemsCount;
 
     // Display sales list
@@ -208,15 +217,16 @@ window.loadReport = () => {
           <div class="flex justify-between items-start">
             <div>
               <div class="font-bold text-lg">${txnDisplay}</div>
-              <div class="text-sm text-gray-600">${sale.timestamp ? new Date(sale.timestamp.toDate()).toLocaleString() : 'N/A'}</div>
+              <div class="text-sm text-gray-600">${sale.timestamp ? new Date(sale.timestamp.toDate()).toLocaleString('en-LK') : 'N/A'}</div>
+              ${sale.userName ? `<div class="text-xs text-blue-600">By: ${sale.userName}</div>` : ''}
               <div class="mt-2">
-                ${sale.items.map(item => `<div class="text-sm">${item.name} × ${item.qty} = ₹${(item.price * item.qty).toFixed(2)}</div>`).join('')}
+                ${sale.items.map(item => `<div class="text-sm">${item.name} × ${item.qty} = ${formatLKR(item.price * item.qty)}</div>`).join('')}
               </div>
             </div>
             <div class="text-right">
-              <div class="text-2xl font-bold text-green-600">₹${sale.total.toFixed(2)}</div>
-              <div class="text-sm text-gray-600">Paid: ₹${sale.tendered.toFixed(2)}</div>
-              <div class="text-sm text-gray-600">Change: ₹${sale.change.toFixed(2)}</div>
+              <div class="text-2xl font-bold text-green-600">${formatLKR(sale.total)}</div>
+              <div class="text-sm text-gray-600">Paid: ${formatLKR(sale.tendered)}</div>
+              <div class="text-sm text-gray-600">Change: ${formatLKR(sale.change)}</div>
             </div>
           </div>
         `;
@@ -250,65 +260,145 @@ window.loadReport = () => {
 };
 
 window.exportPDF = () => {
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF();
-  
-  doc.setFontSize(20);
-  doc.text("Sales Report", 105, 20, { align: "center" });
-  
-  doc.setFontSize(12);
-  const reportType = document.getElementById("reportType").value;
-  doc.text(`Report Type: ${reportType.toUpperCase()}`, 20, 35);
-  doc.text(`Generated: ${new Date().toLocaleString()}`, 20, 45);
-  
-  let y = 60;
-  doc.setFontSize(14);
-  doc.text("Summary:", 20, y);
-  y += 10;
-  
-  doc.setFontSize(11);
-  doc.text(`Total Sales: ${document.getElementById("totalSales").textContent}`, 25, y);
-  y += 7;
-  doc.text(`Total Transactions: ${document.getElementById("totalTransactions").textContent}`, 25, y);
-  y += 7;
-  doc.text(`Average Sale: ${document.getElementById("avgSale").textContent}`, 25, y);
-  y += 7;
-  doc.text(`Items Sold: ${document.getElementById("itemsSold").textContent}`, 25, y);
-  y += 15;
-  
-  doc.setFontSize(14);
-  doc.text("Transactions:", 20, y);
-  y += 10;
-  
-  doc.setFontSize(9);
-  currentSales.forEach((sale, index) => {
-    if (y > 270) {
-      doc.addPage();
-      y = 20;
+  try {
+    const { jsPDF } = window.jspdf;
+    if (!jsPDF) {
+      alert("PDF library not loaded. Please refresh the page.");
+      return;
     }
-    // Use full transaction ID if available, otherwise use document ID
-    const txnId = sale.transactionId || `ID:${sale.id.slice(0,8)}`;
-    doc.text(`${txnId} - ₹${sale.total.toFixed(2)} - ${sale.timestamp ? new Date(sale.timestamp.toDate()).toLocaleString() : 'N/A'}`, 25, y);
+    
+    const doc = new jsPDF('p', 'mm', 'a4'); // Explicit format
+    
+    // Header
+    doc.setFontSize(20);
+    doc.setFont('helvetica', 'bold');
+    doc.text("Sales Report", 105, 20, { align: "center" });
+    
+    // Report Info
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'normal');
+    const reportType = document.getElementById("reportType").value;
+    doc.text(`Report Type: ${reportType.toUpperCase()}`, 20, 35);
+    doc.text(`Generated: ${new Date().toLocaleString('en-LK')}`, 20, 42);
+    
+    // Summary Section
+    let y = 55;
+    doc.setFontSize(14);
+    doc.setFont('helvetica', 'bold');
+    doc.text("Summary:", 20, y);
+    y += 8;
+    
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Total Sales: ${document.getElementById("totalSales").textContent}`, 25, y);
     y += 6;
-  });
-  
-  doc.save(`sales-report-${new Date().toISOString().split('T')[0]}.pdf`);
+    doc.text(`Total Transactions: ${document.getElementById("totalTransactions").textContent}`, 25, y);
+    y += 6;
+    doc.text(`Average Sale: ${document.getElementById("avgSale").textContent}`, 25, y);
+    y += 6;
+    doc.text(`Items Sold: ${document.getElementById("itemsSold").textContent}`, 25, y);
+    y += 12;
+    
+    // Transactions Section
+    doc.setFontSize(14);
+    doc.setFont('helvetica', 'bold');
+    doc.text("Transactions:", 20, y);
+    y += 8;
+    
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    
+    if (currentSales.length === 0) {
+      doc.text("No transactions found for this period.", 25, y);
+    } else {
+      currentSales.forEach((sale, index) => {
+        if (y > 270) {
+          doc.addPage();
+          y = 20;
+        }
+        
+        const txnId = sale.transactionId || `ID:${sale.id.slice(0,8)}`;
+        const dateStr = sale.timestamp ? new Date(sale.timestamp.toDate()).toLocaleString('en-LK') : 'N/A';
+        const totalStr = formatLKR(sale.total);
+        const userName = sale.userName || sale.userEmail || 'Unknown';
+        
+        doc.text(`${txnId}`, 25, y);
+        doc.text(`${dateStr}`, 70, y);
+        doc.text(`${totalStr}`, 140, y);
+        doc.text(`By: ${userName}`, 170, y);
+        
+        y += 5;
+        
+        // Add items if space available
+        if (y < 265) {
+          sale.items.forEach(item => {
+            if (y > 270) return;
+            doc.setFontSize(8);
+            doc.text(`  - ${item.name} x${item.qty}`, 30, y);
+            y += 4;
+          });
+          doc.setFontSize(9);
+          y += 2;
+        }
+      });
+    }
+    
+    // Footer
+    const pageCount = doc.internal.getNumberOfPages();
+    for (let i = 1; i <= pageCount; i++) {
+      doc.setPage(i);
+      doc.setFontSize(8);
+      doc.text(`Page ${i} of ${pageCount}`, 105, 290, { align: "center" });
+    }
+    
+    const filename = `sales-report-${new Date().toISOString().split('T')[0]}.pdf`;
+    doc.save(filename);
+  } catch (error) {
+    console.error("PDF Export Error:", error);
+    alert("Error generating PDF: " + error.message);
+  }
 };
 
 window.exportExcel = () => {
-  const data = currentSales.map(sale => ({
-    'Transaction ID': sale.transactionId || `DocID:${sale.id.slice(0,8)}`,
-    'Date': sale.timestamp ? new Date(sale.timestamp.toDate()).toLocaleString() : 'N/A',
-    'Total': sale.total.toFixed(2),
-    'Tendered': sale.tendered.toFixed(2),
-    'Change': sale.change.toFixed(2),
-    'Items': sale.items.map(i => `${i.name}(${i.qty})`).join(', ')
-  }));
-  
-  const ws = XLSX.utils.json_to_sheet(data);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "Sales");
-  XLSX.writeFile(wb, `sales-report-${new Date().toISOString().split('T')[0]}.xlsx`);
+  try {
+    if (typeof XLSX === 'undefined') {
+      alert("Excel library not loaded. Please refresh the page.");
+      return;
+    }
+    
+    const data = currentSales.map(sale => ({
+      'Transaction ID': sale.transactionId || `DocID:${sale.id.slice(0,8)}`,
+      'Date': sale.timestamp ? new Date(sale.timestamp.toDate()).toLocaleString('en-LK') : 'N/A',
+      'User': sale.userName || sale.userEmail || 'Unknown',
+      'Total (LKR)': sale.total.toFixed(2),
+      'Tendered (LKR)': sale.tendered.toFixed(2),
+      'Change (LKR)': sale.change.toFixed(2),
+      'Items': sale.items.map(i => `${i.name}(${i.qty})`).join(', ')
+    }));
+    
+    const ws = XLSX.utils.json_to_sheet(data);
+    
+    // Auto-size columns
+    const cols = [
+      { wch: 20 }, // Transaction ID
+      { wch: 25 }, // Date
+      { wch: 20 }, // User
+      { wch: 15 }, // Total
+      { wch: 15 }, // Tendered
+      { wch: 15 }, // Change
+      { wch: 50 }  // Items
+    ];
+    ws['!cols'] = cols;
+    
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Sales");
+    
+    const filename = `sales-report-${new Date().toISOString().split('T')[0]}.xlsx`;
+    XLSX.writeFile(wb, filename);
+  } catch (error) {
+    console.error("Excel Export Error:", error);
+    alert("Error generating Excel file: " + error.message);
+  }
 };
 
 // Load today's report by default
