@@ -203,10 +203,11 @@ window.loadReport = () => {
       currentSales.forEach(sale => {
         const div = document.createElement("div");
         div.className = "border-l-4 border-indigo-600 bg-gray-50 p-4 rounded-lg";
+        const txnDisplay = sale.transactionId || `DocID: ${sale.id.slice(0,8).toUpperCase()}`;
         div.innerHTML = `
           <div class="flex justify-between items-start">
             <div>
-              <div class="font-bold text-lg">Transaction #${sale.id.slice(0,8).toUpperCase()}</div>
+              <div class="font-bold text-lg">${txnDisplay}</div>
               <div class="text-sm text-gray-600">${sale.timestamp ? new Date(sale.timestamp.toDate()).toLocaleString() : 'N/A'}</div>
               <div class="mt-2">
                 ${sale.items.map(item => `<div class="text-sm">${item.name} × ${item.qty} = ₹${(item.price * item.qty).toFixed(2)}</div>`).join('')}
@@ -285,7 +286,9 @@ window.exportPDF = () => {
       doc.addPage();
       y = 20;
     }
-    doc.text(`#${sale.id.slice(0,8)} - ₹${sale.total.toFixed(2)} - ${sale.timestamp ? new Date(sale.timestamp.toDate()).toLocaleString() : 'N/A'}`, 25, y);
+    // Use full transaction ID if available, otherwise use document ID
+    const txnId = sale.transactionId || `ID:${sale.id.slice(0,8)}`;
+    doc.text(`${txnId} - ₹${sale.total.toFixed(2)} - ${sale.timestamp ? new Date(sale.timestamp.toDate()).toLocaleString() : 'N/A'}`, 25, y);
     y += 6;
   });
   
@@ -294,7 +297,7 @@ window.exportPDF = () => {
 
 window.exportExcel = () => {
   const data = currentSales.map(sale => ({
-    'Transaction ID': sale.id.slice(0,8).toUpperCase(),
+    'Transaction ID': sale.transactionId || `DocID:${sale.id.slice(0,8)}`,
     'Date': sale.timestamp ? new Date(sale.timestamp.toDate()).toLocaleString() : 'N/A',
     'Total': sale.total.toFixed(2),
     'Tendered': sale.tendered.toFixed(2),

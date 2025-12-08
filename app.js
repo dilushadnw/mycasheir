@@ -367,8 +367,18 @@ window.completeSale = async () => {
   }
 
   try {
-    // Generate transaction ID
-    const transactionId = `TXN${Date.now()}${Math.floor(Math.random() * 1000)}`;
+    // Generate unique transaction ID using crypto API or fallback
+    let transactionId;
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+      // Use crypto.randomUUID for better uniqueness
+      transactionId = `TXN-${crypto.randomUUID()}`;
+    } else {
+      // Fallback for older browsers - use timestamp + random + counter
+      const timestamp = Date.now();
+      const random = Math.floor(Math.random() * 1000000);
+      const counter = (window.txnCounter = (window.txnCounter || 0) + 1);
+      transactionId = `TXN-${timestamp}-${random}-${counter}`;
+    }
     
     // Deduct stock
     for (const item of cart) {
