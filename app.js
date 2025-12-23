@@ -395,23 +395,20 @@ function updateCart() {
   cart.forEach((item, i) => {
     subtotal += item.price * item.qty;
     const div = document.createElement("div");
-    div.className = "bg-gray-50 p-4 rounded-xl flex justify-between items-center gap-3";
+    div.className = "bg-gray-50 p-3 rounded-lg flex justify-between items-center gap-2";
     div.innerHTML = `
-      <div class="flex-1">
-        <div class="font-bold text-xl">${item.name}</div>
-        <div class="text-gray-600">${formatLKR(item.price)} each</div>
+      <div class="flex-1 min-w-0">
+        <div class="font-bold text-base truncate">${item.name}</div>
+        <div class="text-gray-600 text-sm">${formatLKR(item.price)} × ${item.qty} = ${formatLKR(item.price * item.qty)}</div>
       </div>
-      <div class="flex flex-col items-center gap-2">
-        <div class="flex gap-2 items-center">
-          <button class="qty-minus bg-red-600 text-white w-10 h-10 rounded-full text-2xl hover:bg-red-700 font-bold" data-index="${i}">−</button>
-          <input type="number" class="qty-input w-20 text-center border-2 rounded-lg text-xl font-bold p-1" value="${item.qty}" min="1" data-index="${i}"/>
-          <button class="qty-plus bg-green-600 text-white w-10 h-10 rounded-full text-2xl hover:bg-green-700 font-bold" data-index="${i}">+</button>
-        </div>
-        <div class="text-xl font-bold text-green-600">${formatLKR(item.price * item.qty)}</div>
+      <div class="flex gap-1 items-center">
+        <button class="qty-minus bg-red-600 text-white w-8 h-8 rounded-full text-lg hover:bg-red-700 font-bold flex items-center justify-center" data-index="${i}">−</button>
+        <input type="number" class="qty-input w-12 text-center border rounded text-base font-bold p-1" value="${item.qty}" min="1" data-index="${i}"/>
+        <button class="qty-plus bg-green-600 text-white w-8 h-8 rounded-full text-lg hover:bg-green-700 font-bold flex items-center justify-center" data-index="${i}">+</button>
+        <button class="remove-item bg-red-500 text-white w-8 h-8 rounded-lg hover:bg-red-600 font-bold flex items-center justify-center ml-1" data-index="${i}">
+          <i class="fas fa-trash text-xs"></i>
+        </button>
       </div>
-      <button class="remove-item bg-red-500 text-white px-4 py-2 rounded-lg hover:bg-red-600 font-bold" data-index="${i}">
-        <i class="fas fa-trash"></i>
-      </button>
     `;
     itemsDiv.appendChild(div);
   });
