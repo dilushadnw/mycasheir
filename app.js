@@ -3,6 +3,7 @@ import { auth, db } from "./firebase-config.js";
 import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-auth.js";
 import { collection, doc, onSnapshot, addDoc, updateDoc, query, where, orderBy, serverTimestamp, increment, setDoc, getDoc, getDocs } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore.js";
 import { beep, printReceipt, formatLKR } from "./utils.js";
+import { offlineDB } from "./offline-db.js";
 
 let cart = [];
 let settings = { shopName: "My Shop", address: "Your Address", taxRate: 0, currency: "LKR" };
@@ -10,6 +11,47 @@ let currentUser = null;
 let userRole = "cashier"; // default role
 let isProcessingSale = false; // Prevent duplicate transactions
 let productsCache = []; // Cache for faster search
+let isOffline = !navigator.onLine; // Track offline status
+
+// Initialize offline database
+offlineDB.init().then(() => {
+  console.log('Offline database initialized');
+}).catch(error => {
+  console.error('Failed to initialize offline database:', error);
+});
+
+// Show offline/online status
+function updateOnlineStatus() {
+  isOffline = !navigator.onLine;
+  const statusDiv = document.getElementById('onlineStatus');
+  if (statusDiv) {
+    if (isOffline) {
+      statusDiv.textContent = '⚠️ OFFLINE MODE';
+      statusDiv.className = 'bg-red-500 text-white px-4 py-2 rounded-lg font-bold text-sm';
+    } else {
+      statusDiv.textContent = '✓ ONLINE';
+      statusDiv.className = 'bg-green-500 text-white px-4 py-2 rounded-lg font-bold text-sm';
+    }
+  }
+}
+
+window.addEventListener('online', updateOnlineStatus);
+window.addEventListener('offline', updateOnlineStatus);
+
+// Sync sale to Firebase (called by offline-db.js)
+window.syncSaleToFirebase = async (sale) => {
+  try {
+    // Remove local IndexedDB fields before syncing
+    const { id, synced, offlineCreated, localTimestamp, syncedAt, ...firebaseSale } = sale;
+    
+    // Add to Firebase
+    await addDoc(collection(db, "sales"), firebaseSale);
+    return true;
+  } catch (error) {
+    console.error('Failed to sync sale to Firebase:', error);
+    throw error;
+  }
+};
 
 window.login = async () => {
   const email = document.getElementById("email").value.trim();
@@ -105,17 +147,31 @@ function loadProducts() {
   let searchListener = null;
   let enterListener = null;
   
+  // Load from offline DB first for faster initial load
+  if (offlineDB.db) {
+    offlineDB.getAllProducts().then(products => {
+      if (products && products.length > 0) {
+        console.log(`Loaded ${products.length} products from offline cache`);
+        productsCache = products;
+        renderProductsGrid(products);
+      }
+    }).catch(err => console.error('Error loading offline products:', err));
+  }
+  
+  // Then sync with Firebase (online mode) 
   onSnapshot(query(collection(db, "products"), orderBy("name")), snap => {
     const grid = document.getElementById("productsGrid");
     
     // Clear cache and rebuild
     productsCache = [];
+    const products = [];
     const fragment = document.createDocumentFragment(); // Use fragment for better performance
     
     snap.forEach(d => {
       const p = d.data(); 
       p.id = d.id;
       productsCache.push(p); // Cache products for search
+      products.push(p);
       
       const div = document.createElement("div");
       div.className = `bg-white p-8 rounded-3xl shadow-2xl text-center cursor-pointer hover:scale-110 transition-all duration-200 ${p.stock <= 5 ? 'border-8 border-red-500 animate-pulse' : 'border-4 border-transparent'}`;
@@ -152,6 +208,13 @@ function loadProducts() {
     
     grid.innerHTML = "";
     grid.appendChild(fragment);
+    
+    // Save products to offline DB for offline access
+    if (offlineDB.db && products.length > 0) {
+      offlineDB.saveProducts(products).catch(err => 
+        console.error('Error saving products to offline DB:', err)
+      );
+    }
     
     // Remove old listeners to prevent duplicates
     if (searchListener) searchInput.removeEventListener("input", searchListener);
@@ -503,13 +566,26 @@ window.completeSale = async () => {
   }
 
   try {
-    // Check stock availability
+    // Check stock availability (use offline DB if offline)
     for (const item of cart) {
-      const productDoc = await getDoc(doc(db, "products", item.id));
-      if (!productDoc.exists()) {
-        throw new Error(`Product ${item.name} not found!`);
+      let currentStock = 0;
+      
+      if (isOffline && offlineDB.db) {
+        // Check offline DB
+        const offlineProduct = await offlineDB.getProduct(item.id);
+        if (!offlineProduct) {
+          throw new Error(`Product ${item.name} not found in offline database!`);
+        }
+        currentStock = offlineProduct.stock;
+      } else {
+        // Check Firebase
+        const productDoc = await getDoc(doc(db, "products", item.id));
+        if (!productDoc.exists()) {
+          throw new Error(`Product ${item.name} not found!`);
+        }
+        currentStock = productDoc.data().stock;
       }
-      const currentStock = productDoc.data().stock;
+      
       if (currentStock < item.qty) {
         throw new Error(`Insufficient stock for ${item.name}!\nRequested: ${item.qty}, Available: ${currentStock}`);
       }
@@ -533,11 +609,17 @@ window.completeSale = async () => {
       }
     }
     
-    // Deduct stock atomically
+    // Deduct stock (online or offline)
     for (const item of cart) {
-      await updateDoc(doc(db, "products", item.id), { 
-        stock: increment(-item.qty) 
-      });
+      if (isOffline && offlineDB.db) {
+        // Update offline DB
+        await offlineDB.updateProductStock(item.id, -item.qty);
+      } else {
+        // Update Firebase
+        await updateDoc(doc(db, "products", item.id), { 
+          stock: increment(-item.qty) 
+        });
+      }
     }
 
     // Save sale with user tracking and discount
@@ -554,21 +636,28 @@ window.completeSale = async () => {
       discount: discountValue,
       discountType: discountValue > 0 ? discountType : null,
       discountAmount: discountValue > 0 ? discountAmount : 0,
-      total, 
+      total,
       tendered, 
       change: tendered - total,
       paymentMethod: "Cash",
-      timestamp: serverTimestamp(),
+      timestamp: isOffline ? new Date() : serverTimestamp(),
       userId: currentUser?.uid || "guest",
       userEmail: currentUser?.email || "guest",
       userName: currentUser?.displayName || currentUser?.email || "Guest User"
     };
     
-    await addDoc(collection(db, "sales"), sale);
+    // Save to Firebase (online) or IndexedDB (offline)
+    if (isOffline && offlineDB.db) {
+      // Save to offline database
+      await offlineDB.saveSale(sale);
+      alert(`Sale saved offline!\nTransaction ID: ${transactionId}\n\n⚠️ Will sync to server when online\nChange: ${formatLKR(tendered - total)}`);
+    } else {
+      // Save to Firebase
+      await addDoc(collection(db, "sales"), sale);
+      alert(`Sale completed successfully!\nTransaction ID: ${transactionId}\nChange: ${formatLKR(tendered - total)}`);
+    }
 
     printReceipt({ ...sale, transactionId }, settings);
-    
-    alert(`Sale completed successfully!\nTransaction ID: ${transactionId}\nChange: ${formatLKR(tendered - total)}`);
     
     cart = [];
     document.getElementById("cashTendered").value = "";
