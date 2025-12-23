@@ -6,15 +6,34 @@
     <a href="index.html" class="bg-indigo-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-indigo-700"><i class="fas fa-arrow-left mr-2"></i>Back to POS</a>
   </div>
 
-  <div class="max-w-4xl mx-auto bg-white p-8 md:p-10 rounded-3xl shadow-2xl mb-10">
+  <div class="max-w-6xl mx-auto bg-white p-8 md:p-10 rounded-3xl shadow-2xl mb-10">
     <h2 class="text-2xl md:text-3xl font-bold mb-6">Add New Product</h2>
-    <div class="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
-      <input id="name" placeholder="Product Name" class="p-4 border-2 rounded-xl text-xl" required/>
-      <input id="barcode" placeholder="Barcode (optional)" class="p-4 border-2 rounded-xl text-xl"/>
-      <input id="category" placeholder="Category (optional)" class="p-4 border-2 rounded-xl text-xl"/>
-      <input id="price" type="number" step="0.01" placeholder="Price (LKR)" class="p-4 border-2 rounded-xl text-xl" required min="0"/>
-      <input id="stock" type="number" placeholder="Stock Quantity" class="p-4 border-2 rounded-xl text-xl" required min="0"/>
+    
+    <!-- Basic Product Info -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+      <input id="name" placeholder="Product Name *" class="p-4 border-2 rounded-xl text-lg" required/>
+      <input id="barcode" placeholder="Barcode (scan or type)" class="p-4 border-2 rounded-xl text-lg" autofocus/>
+      <input id="category" placeholder="Category" class="p-4 border-2 rounded-xl text-lg"/>
     </div>
+    
+    <!-- Pricing & Stock Info -->
+    <div class="grid grid-cols-1 md:grid-cols-5 gap-4 mb-4">
+      <input id="buyingPrice" type="number" step="0.01" placeholder="Buying Price (LKR) *" class="p-4 border-2 rounded-xl text-lg" required min="0"/>
+      <input id="sellingPrice" type="number" step="0.01" placeholder="Selling Price (LKR) *" class="p-4 border-2 rounded-xl text-lg" required min="0"/>
+      <input id="stock" type="number" placeholder="Quantity *" class="p-4 border-2 rounded-xl text-lg" required min="0"/>
+      <input id="freeItems" type="number" placeholder="Free Items" class="p-4 border-2 rounded-xl text-lg" min="0" value="0"/>
+      <div class="p-4 border-2 rounded-xl text-lg bg-green-50 font-bold text-green-700" id="profitDisplay">
+        Profit: LKR 0.00
+      </div>
+    </div>
+    
+    <!-- Purchase Details -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+      <input id="purchaseDate" type="date" class="p-4 border-2 rounded-xl text-lg" />
+      <input id="supplierName" placeholder="Supplier Name" class="p-4 border-2 rounded-xl text-lg"/>
+      <input id="supplierDetails" placeholder="Supplier Contact/Notes" class="p-4 border-2 rounded-xl text-lg"/>
+    </div>
+    
     <button onclick="addProduct()" class="w-full bg-indigo-600 text-white px-12 py-5 rounded-xl text-xl md:text-2xl font-bold hover:bg-indigo-700">
       <i class="fas fa-plus mr-2"></i>ADD PRODUCT
     </button>
@@ -51,23 +70,98 @@ onAuthStateChanged(auth, async user => {
 
 let allProducts = [];
 
+// Calculate and display profit when prices change
+function updateProfitDisplay() {
+  const buyingPrice = parseFloat(document.getElementById("buyingPrice")?.value) || 0;
+  const sellingPrice = parseFloat(document.getElementById("sellingPrice")?.value) || 0;
+  const stock = parseInt(document.getElementById("stock")?.value) || 0;
+  const freeItems = parseInt(document.getElementById("freeItems")?.value) || 0;
+  
+  const profitPerItem = sellingPrice - buyingPrice;
+  const totalProfit = profitPerItem * stock;
+  
+  const profitDisplay = document.getElementById("profitDisplay");
+  if (profitDisplay) {
+    profitDisplay.innerHTML = `
+      Profit/Item: <span class="${profitPerItem >= 0 ? 'text-green-700' : 'text-red-700'}">${profitPerItem.toFixed(2)}</span><br>
+      Total: <span class="${totalProfit >= 0 ? 'text-green-700' : 'text-red-700'}">LKR ${totalProfit.toFixed(2)}</span>
+    `;
+  }
+}
+
+// Add event listeners after DOM loads
+setTimeout(() => {
+  ['buyingPrice', 'sellingPrice', 'stock', 'freeItems'].forEach(id => {
+    const elem = document.getElementById(id);
+    if (elem) {
+      elem.addEventListener('input', updateProfitDisplay);
+    }
+  });
+  
+  // Set default purchase date to today
+  const purchaseDateInput = document.getElementById('purchaseDate');
+  if (purchaseDateInput) {
+    purchaseDateInput.valueAsDate = new Date();
+  }
+  
+  // Barcode auto-fill functionality
+  const barcodeInput = document.getElementById('barcode');
+  if (barcodeInput) {
+    barcodeInput.addEventListener('change', async function() {
+      const barcode = this.value.trim();
+      if (!barcode) return;
+      
+      try {
+        const q = query(collection(db, "products"), where("barcode", "==", barcode));
+        const snapshot = await getDocs(q);
+        
+        if (!snapshot.empty) {
+          const existingProduct = snapshot.docs[0].data();
+          const fillData = confirm(`Product "${existingProduct.name}" found with this barcode!\n\nDo you want to auto-fill the product details?\n(You can then update with new prices if needed)`);
+          
+          if (fillData) {
+            document.getElementById('name').value = existingProduct.name;
+            document.getElementById('category').value = existingProduct.category || '';
+            document.getElementById('buyingPrice').value = existingProduct.buyingPrice || existingProduct.price || '';
+            document.getElementById('sellingPrice').value = existingProduct.sellingPrice || existingProduct.price || '';
+            updateProfitDisplay();
+          }
+        }
+      } catch (error) {
+        console.error("Error checking barcode:", error);
+      }
+    });
+  }
+}, 500);
+
 window.addProduct = async () => {
   const name = document.getElementById("name").value.trim();
   const barcode = document.getElementById("barcode").value.trim();
   const category = document.getElementById("category").value.trim();
-  const price = parseFloat(document.getElementById("price").value);
+  const buyingPrice = parseFloat(document.getElementById("buyingPrice").value);
+  const sellingPrice = parseFloat(document.getElementById("sellingPrice").value);
   const stock = parseInt(document.getElementById("stock").value);
+  const freeItems = parseInt(document.getElementById("freeItems").value) || 0;
+  const purchaseDate = document.getElementById("purchaseDate").value;
+  const supplierName = document.getElementById("supplierName").value.trim();
+  const supplierDetails = document.getElementById("supplierDetails").value.trim();
   
   if (!name) return alert("Please enter product name");
-  if (isNaN(price) || price <= 0) return alert("Please enter valid price (LKR)");
+  if (isNaN(buyingPrice) || buyingPrice < 0) return alert("Please enter valid buying price (LKR)");
+  if (isNaN(sellingPrice) || sellingPrice <= 0) return alert("Please enter valid selling price (LKR)");
   if (isNaN(stock) || stock < 0) return alert("Please enter valid stock quantity");
 
   try {
-    // Check if product with same name or barcode already exists
+    // Calculate profit
+    const profitPerItem = sellingPrice - buyingPrice;
+    const totalProfit = profitPerItem * stock;
+    
+    // Check if product with same name exists
     const q = query(collection(db, "products"), where("name", "==", name));
     const snapshot = await getDocs(q);
     
-    if (!snapshot.empty) {
+    if (!snapshot.empty && !barcode) {
+      // Product exists without barcode scan - ask what to do
       const existingDoc = snapshot.docs[0];
       const existingData = existingDoc.data();
       
@@ -75,12 +169,68 @@ window.addProduct = async () => {
         // Update existing product stock
         await updateDoc(doc(db, "products", existingDoc.id), { 
           stock: increment(stock),
-          price: price, // Update price as well
-          category: category || existingData.category || ""
+          buyingPrice: buyingPrice,
+          sellingPrice: sellingPrice,
+          price: sellingPrice, // Keep for backward compatibility
+          category: category || existingData.category || "",
+          freeItems: (existingData.freeItems || 0) + freeItems,
+          lastPurchaseDate: purchaseDate || new Date().toISOString().split('T')[0],
+          lastSupplier: supplierName || existingData.lastSupplier || ""
         });
         alert(`Stock updated! New total: ${existingData.stock + stock} units`);
       } else {
         return;
+      }
+    } else if (!snapshot.empty && barcode) {
+      // Product exists with same name and barcode - this might be new price point
+      const existingDoc = snapshot.docs[0];
+      const existingData = existingDoc.data();
+      
+      const priceChanged = existingData.buyingPrice !== buyingPrice || existingData.sellingPrice !== sellingPrice;
+      
+      if (priceChanged) {
+        const action = confirm(`This product exists but with different prices!\n\nExisting: Buy ${existingData.buyingPrice} / Sell ${existingData.sellingPrice}\nNew: Buy ${buyingPrice} / Sell ${sellingPrice}\n\nClick OK to add as NEW price point with separate stock\nClick Cancel to update existing product`);
+        
+        if (action) {
+          // Add as new price variant
+          await addDoc(collection(db, "products"), { 
+            name, 
+            barcode: barcode || "",
+            category: category || "",
+            buyingPrice,
+            sellingPrice,
+            price: sellingPrice, // For backward compatibility
+            stock,
+            freeItems,
+            profitPerItem,
+            totalProfit,
+            purchaseDate: purchaseDate || new Date().toISOString().split('T')[0],
+            supplierName: supplierName || "",
+            supplierDetails: supplierDetails || "",
+            priceVariant: true,
+            parentProduct: name,
+            createdAt: new Date()
+          });
+          alert("Product added as new price variant!");
+        } else {
+          // Update existing
+          await updateDoc(doc(db, "products", existingDoc.id), { 
+            stock: increment(stock),
+            buyingPrice: buyingPrice,
+            sellingPrice: sellingPrice,
+            price: sellingPrice,
+            category: category || existingData.category || "",
+            freeItems: (existingData.freeItems || 0) + freeItems
+          });
+          alert(`Stock updated! New total: ${existingData.stock + stock} units`);
+        }
+      } else {
+        // Same prices, just add stock
+        await updateDoc(doc(db, "products", existingDoc.id), { 
+          stock: increment(stock),
+          freeItems: (existingData.freeItems || 0) + freeItems
+        });
+        alert(`Stock updated! New total: ${existingData.stock + stock} units`);
       }
     } else {
       // Add new product
@@ -88,8 +238,16 @@ window.addProduct = async () => {
         name, 
         barcode: barcode || "",
         category: category || "",
-        price, 
+        buyingPrice,
+        sellingPrice,
+        price: sellingPrice, // For backward compatibility  
         stock,
+        freeItems,
+        profitPerItem,
+        totalProfit,
+        purchaseDate: purchaseDate || new Date().toISOString().split('T')[0],
+        supplierName: supplierName || "",
+        supplierDetails: supplierDetails || "",
         createdAt: new Date()
       });
       alert("Product added successfully!");
@@ -99,10 +257,20 @@ window.addProduct = async () => {
     document.getElementById("name").value = "";
     document.getElementById("barcode").value = "";
     document.getElementById("category").value = "";
-    document.getElementById("price").value = "";
+    document.getElementById("buyingPrice").value = "";
+    document.getElementById("sellingPrice").value = "";
     document.getElementById("stock").value = "";
+    document.getElementById("freeItems").value = "0";
+    document.getElementById("supplierName").value = "";
+    document.getElementById("supplierDetails").value = "";
+    document.getElementById("purchaseDate").valueAsDate = new Date();
+    updateProfitDisplay();
+    
+    // Re-focus barcode for next entry
+    document.getElementById("barcode").focus();
   } catch (error) {
     alert("Error: " + error.message);
+    console.error("Product add error:", error);
   }
 };
 
@@ -183,6 +351,13 @@ function renderProducts(products) {
       titleDiv.appendChild(barcodeP);
     }
     
+    if (p.category) {
+      const categoryP = document.createElement("p");
+      categoryP.className = "text-xs text-indigo-600 mt-1";
+      categoryP.textContent = `📁 ${p.category}`;
+      titleDiv.appendChild(categoryP);
+    }
+    
     const idSpan = document.createElement("span");
     idSpan.className = "text-xs bg-gray-200 px-2 py-1 rounded";
     idSpan.textContent = `#${p.id.slice(0,6)}`;
@@ -191,17 +366,67 @@ function renderProducts(products) {
     headerDiv.appendChild(idSpan);
     card.appendChild(headerDiv);
     
-    // Price
-    const priceP = document.createElement("p");
-    priceP.className = "text-3xl font-bold text-green-600";
-    priceP.textContent = `₹${p.price.toFixed(2)}`;
-    card.appendChild(priceP);
+    // Price info
+    const priceDiv = document.createElement("div");
+    priceDiv.className = "mb-3";
+    
+    if (p.buyingPrice !== undefined && p.sellingPrice !== undefined) {
+      const buyP = document.createElement("p");
+      buyP.className = "text-sm text-gray-600";
+      buyP.textContent = `Buy: LKR ${p.buyingPrice.toFixed(2)}`;
+      priceDiv.appendChild(buyP);
+      
+      const sellP = document.createElement("p");
+      sellP.className = "text-2xl font-bold text-green-600";
+      sellP.textContent = `Sell: LKR ${p.sellingPrice.toFixed(2)}`;
+      priceDiv.appendChild(sellP);
+      
+      const profitPerItem = p.sellingPrice - p.buyingPrice;
+      const profitP = document.createElement("p");
+      profitP.className = `text-sm font-semibold ${profitPerItem >= 0 ? 'text-green-700' : 'text-red-700'}`;
+      profitP.textContent = `Profit: LKR ${profitPerItem.toFixed(2)}/item`;
+      priceDiv.appendChild(profitP);
+    } else {
+      // Legacy products with just price
+      const priceP = document.createElement("p");
+      priceP.className = "text-3xl font-bold text-green-600";
+      priceP.textContent = `LKR ${(p.price || p.sellingPrice || 0).toFixed(2)}`;
+      priceDiv.appendChild(priceP);
+    }
+    card.appendChild(priceDiv);
     
     // Stock
     const stockP = document.createElement("p");
     stockP.className = `text-xl font-bold mt-2 ${p.stock <= 5 ? 'text-red-600 animate-pulse' : p.stock <= 10 ? 'text-orange-600' : 'text-gray-700'}`;
-    stockP.textContent = `Stock: ${p.stock}${p.stock <= 5 ? ' ⚠️ Low!' : ''}`;
+    stockP.textContent = `Stock: ${p.stock}${p.freeItems ? ` (+ ${p.freeItems} free)` : ''}${p.stock <= 5 ? ' ⚠️ Low!' : ''}`;
     card.appendChild(stockP);
+    
+    // Supplier & Purchase info
+    if (p.supplierName || p.purchaseDate) {
+      const supplierDiv = document.createElement("div");
+      supplierDiv.className = "mt-3 text-xs text-gray-500 border-t pt-2";
+      
+      if (p.supplierName) {
+        const supplierP = document.createElement("p");
+        supplierP.textContent = `Supplier: ${p.supplierName}`;
+        supplierDiv.appendChild(supplierP);
+      }
+      
+      if (p.purchaseDate) {
+        const dateP = document.createElement("p");
+        dateP.textContent = `Purchased: ${p.purchaseDate}`;
+        supplierDiv.appendChild(dateP);
+      }
+      
+      card.appendChild(supplierDiv);
+    }
+    
+    if (p.priceVariant) {
+      const variantBadge = document.createElement("span");
+      variantBadge.className = "inline-block bg-purple-100 text-purple-700 text-xs px-2 py-1 rounded mt-2";
+      variantBadge.textContent = "Price Variant";
+      card.appendChild(variantBadge);
+    }
     
     // Buttons container
     const buttonsDiv = document.createElement("div");

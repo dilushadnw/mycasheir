@@ -104,11 +104,30 @@
       <div id="cartItems" class="flex-1 overflow-y-auto space-y-3 mb-6"></div>
 
       <div class="border-t-4 border-indigo-600 pt-6 space-y-5 text-2xl">
+        <!-- Subtotal -->
+        <div class="flex justify-between text-xl">
+          <span>Subtotal</span><span id="subtotal">LKR 0.00</span>
+        </div>
+        
+        <!-- Discount Input -->
+        <div class="border-2 border-dashed border-gray-300 p-4 rounded-xl">
+          <label class="text-lg font-semibold text-gray-700 block mb-2">Discount (Press F3)</label>
+          <div class="flex gap-2">
+            <input type="number" id="discountAmount" placeholder="0.00" class="flex-1 p-3 border-2 rounded-lg text-xl" step="0.01" min="0"/>
+            <select id="discountType" class="p-3 border-2 rounded-lg text-lg font-bold">
+              <option value="fixed">LKR</option>
+              <option value="percent">%</option>
+            </select>
+          </div>
+          <div class="text-sm text-gray-500 mt-2" id="discountInfo">No discount applied</div>
+        </div>
+        
+        <!-- Total -->
         <div class="flex justify-between font-bold text-3xl text-green-600">
-          <span>TOTAL</span><span id="total">₹0.00</span>
+          <span>TOTAL</span><span id="total">LKR 0.00</span>
         </div>
         <input type="number" id="cashTendered" placeholder="Cash Tendered (Press F2)" class="w-full p-5 border-4 rounded-xl text-3xl text-right" step="0.01"/>
-        <div class="text-4xl font-bold text-green-600">Change: <span id="change">₹0.00</span></div>
+        <div class="text-4xl font-bold text-green-600">Change: <span id="change">LKR 0.00</span></div>
         <button onclick="completeSale()" class="w-full bg-green-600 hover:bg-green-700 text-white py-10 text-4xl font-bold rounded-2xl shadow-xl transition-all hover:scale-105">
           <i class="fas fa-check-circle mr-3"></i>COMPLETE SALE
           <div class="text-sm font-normal mt-2 opacity-75">(Press F9 or Ctrl+Enter)</div>
@@ -143,6 +162,14 @@
       <div class="flex justify-between border-b pb-2">
         <span class="font-semibold">Focus Cash Input</span>
         <kbd class="bg-gray-200 px-3 py-1 rounded">F2</kbd>
+      </div>
+      <div class="flex justify-between border-b pb-2">
+        <span class="font-semibold">Focus Discount Input</span>
+        <kbd class="bg-gray-200 px-3 py-1 rounded">F3</kbd>
+      </div>
+      <div class="flex justify-between border-b pb-2">
+        <span class="font-semibold">Focus Quantity (in cart)</span>
+        <kbd class="bg-gray-200 px-3 py-1 rounded">F4</kbd>
       </div>
       <div class="flex justify-between border-b pb-2">
         <span class="font-semibold">Complete Sale</span>

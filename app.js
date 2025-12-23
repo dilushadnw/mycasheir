@@ -248,10 +248,10 @@ function addToCart(p) {
 function updateCart() {
   const itemsDiv = document.getElementById("cartItems");
   itemsDiv.innerHTML = "";
-  let total = 0;
+  let subtotal = 0;
 
   cart.forEach((item, i) => {
-    total += item.price * item.qty;
+    subtotal += item.price * item.qty;
     const div = document.createElement("div");
     div.className = "bg-gray-50 p-4 rounded-xl flex justify-between items-center gap-3";
     div.innerHTML = `
@@ -317,6 +317,26 @@ function updateCart() {
     });
   });
 
+  // Calculate discount
+  const discountAmount = parseFloat(document.getElementById("discountAmount")?.value) || 0;
+  const discountType = document.getElementById("discountType")?.value || "fixed";
+  
+  let discountValue = 0;
+  if (discountAmount > 0) {
+    if (discountType === "percent") {
+      discountValue = (subtotal * discountAmount) / 100;
+      document.getElementById("discountInfo").textContent = `Discount: ${discountAmount}% = ${formatLKR(discountValue)}`;
+    } else {
+      discountValue = discountAmount;
+      document.getElementById("discountInfo").textContent = `Discount: ${formatLKR(discountValue)}`;
+    }
+  } else {
+    document.getElementById("discountInfo").textContent = "No discount applied";
+  }
+  
+  const total = Math.max(0, subtotal - discountValue);
+  
+  document.getElementById("subtotal").textContent = formatLKR(subtotal);
   document.getElementById("total").textContent = formatLKR(total);
   document.getElementById("cartCount").textContent = cart.reduce((s,i)=>s+i.qty,0);
 
@@ -325,6 +345,15 @@ function updateCart() {
 }
 
 document.getElementById("cashTendered").oninput = updateCart;
+
+// Add discount input listeners
+setTimeout(() => {
+  const discountAmountInput = document.getElementById("discountAmount");
+  const discountTypeSelect = document.getElementById("discountType");
+  
+  if (discountAmountInput) discountAmountInput.oninput = updateCart;
+  if (discountTypeSelect) discountTypeSelect.onchange = updateCart;
+}, 500);
 
 // Clear cart function
 window.clearCart = () => {
@@ -358,6 +387,26 @@ document.addEventListener("keydown", (e) => {
     e.preventDefault();
     document.getElementById("cashTendered").focus();
     document.getElementById("cashTendered").select();
+  }
+  
+  // F3 - Focus discount input
+  if (e.key === "F3") {
+    e.preventDefault();
+    const discountInput = document.getElementById("discountAmount");
+    if (discountInput) {
+      discountInput.focus();
+      discountInput.select();
+    }
+  }
+  
+  // F4 - Focus first quantity input in cart
+  if (e.key === "F4") {
+    e.preventDefault();
+    const firstQtyInput = document.querySelector(".qty-input");
+    if (firstQtyInput) {
+      firstQtyInput.focus();
+      firstQtyInput.select();
+    }
   }
   
   // F9 or Ctrl+Enter - Complete sale
@@ -469,6 +518,21 @@ window.completeSale = async () => {
     // Generate sequential transaction ID
     const transactionId = await generateTransactionId();
     
+    // Calculate discount and subtotal
+    const subtotalText = document.getElementById("subtotal").textContent.replace(/[^\d.-]/g, "").replace(/\.(?=.*\.)/g, "");
+    const subtotal = parseFloat(subtotalText);
+    const discountAmount = parseFloat(document.getElementById("discountAmount")?.value) || 0;
+    const discountType = document.getElementById("discountType")?.value || "fixed";
+    
+    let discountValue = 0;
+    if (discountAmount > 0) {
+      if (discountType === "percent") {
+        discountValue = (subtotal * discountAmount) / 100;
+      } else {
+        discountValue = discountAmount;
+      }
+    }
+    
     // Deduct stock atomically
     for (const item of cart) {
       await updateDoc(doc(db, "products", item.id), { 
@@ -476,7 +540,7 @@ window.completeSale = async () => {
       });
     }
 
-    // Save sale with user tracking
+    // Save sale with user tracking and discount
     const sale = {
       transactionId,
       items: cart.map(i => ({ 
@@ -486,6 +550,10 @@ window.completeSale = async () => {
         productId: i.id,
         category: i.category || "Uncategorized"
       })),
+      subtotal,
+      discount: discountValue,
+      discountType: discountValue > 0 ? discountType : null,
+      discountAmount: discountValue > 0 ? discountAmount : 0,
       total, 
       tendered, 
       change: tendered - total,
@@ -504,6 +572,7 @@ window.completeSale = async () => {
     
     cart = [];
     document.getElementById("cashTendered").value = "";
+    if (document.getElementById("discountAmount")) document.getElementById("discountAmount").value = "";
     updateCart();
     beep(); beep(); beep();
   } catch (error) {

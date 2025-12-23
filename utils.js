@@ -55,6 +55,8 @@ export function printReceipt(data, settings) {
     ).join('')}
   </div>
   <div class="line"></div>
+  ${data.subtotal ? `<div class="item-row"><span>Subtotal:</span><span>${formatLKR(data.subtotal)}</span></div>` : ''}
+  ${data.discount && data.discount > 0 ? `<div class="item-row" style="color: red;"><span>Discount ${data.discountType === 'percent' ? '(' + data.discountAmount + '%)' : ''}:</span><span>-${formatLKR(data.discount)}</span></div>` : ''}
   <div class="big">TOTAL: ${formatLKR(data.total)}</div>
   <div>Cash: ${formatLKR(data.tendered)}</div>
   <div>Change: ${formatLKR(data.change)}</div>
