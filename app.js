@@ -182,25 +182,18 @@ function loadProducts() {
       
       div.onclick = (e) => {
         e.stopPropagation();
-        if (p.stock <= 0) {
-          alert(`${p.name} is out of stock!`);
-          beep(); beep();
-          return;
-        }
-        beep();
-        const existing = cart.find(i => i.id === p.id);
-        if (existing) existing.qty += 1;
-        else cart.push({ ...p, qty: 1 });
-        updateCart();
+        addToCart(p);
       };
 
+      const price = p.sellingPrice || p.price || 0;
       div.innerHTML = `
         <div class="text-2xl font-bold text-gray-800 mb-2">${p.name}</div>
-        <div class="text-4xl font-bold text-green-600">${formatLKR(p.price)}</div>
+        <div class="text-4xl font-bold text-green-600">${formatLKR(price)}</div>
         <div class="text-xl mt-3 ${p.stock <= 5 ? 'text-red-600 font-bold' : 'text-gray-600'}">
           Stock: ${p.stock}
         </div>
         ${p.category ? `<div class="text-sm text-gray-500 mt-1">${p.category}</div>` : ''}
+        ${p.priceVariant ? '<div class="text-xs bg-purple-100 text-purple-700 px-2 py-1 rounded mt-1">Multiple Prices</div>' : ''}
       `;
 
       fragment.appendChild(div);
@@ -302,11 +295,97 @@ function loadProducts() {
 
 function addToCart(p) {
   beep();
-  const existing = cart.find(i => i.id === p.id);
-  if (existing) existing.qty += 1;
-  else cart.push({ ...p, qty: 1 });
-  updateCart();
+  
+  // Check if product has multiple price variants
+  const variants = productsCache.filter(prod => 
+    prod.name === p.name && (prod.priceVariant || prod.id === p.id)
+  );
+  
+  if (variants.length > 1) {
+    // Show modal to select price variant
+    showPriceVariantModal(variants);
+  } else {
+    // Single product, add directly
+    const existing = cart.find(i => i.id === p.id);
+    if (existing) existing.qty += 1;
+    else cart.push({ ...p, qty: 1 });
+    updateCart();
+  }
 }
+
+function showPriceVariantModal(variants) {
+  // Create modal HTML
+  const modal = document.createElement('div');
+  modal.id = 'priceVariantModal';
+  modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
+  modal.onclick = (e) => {
+    if (e.target === modal) modal.remove();
+  };
+  
+  const content = document.createElement('div');
+  content.className = 'bg-white p-8 rounded-3xl shadow-2xl max-w-2xl w-full mx-4';
+  content.onclick = (e) => e.stopPropagation();
+  
+  content.innerHTML = `
+    <h2 class="text-3xl font-bold mb-6 text-indigo-700">Select Price Variant for ${variants[0].name}</h2>
+    <div class="space-y-4 max-h-96 overflow-y-auto">
+      ${variants.map(v => `
+        <button onclick="selectPriceVariant('${v.id}')" class="w-full p-6 border-4 border-gray-200 rounded-xl hover:border-indigo-600 hover:bg-indigo-50 transition text-left">
+          <div class="flex justify-between items-start">
+            <div class="flex-1">
+              <div class="text-2xl font-bold text-gray-800">
+                ${v.buyingPrice !== undefined ? `Buy: ${formatLKR(v.buyingPrice)}` : ''}
+                ${v.sellingPrice !== undefined ? ` → Sell: ${formatLKR(v.sellingPrice)}` : formatLKR(v.price || 0)}
+              </div>
+              ${v.buyingPrice !== undefined && v.sellingPrice !== undefined ? `
+                <div class="text-sm text-green-600 mt-1">
+                  Profit: ${formatLKR(v.sellingPrice - v.buyingPrice)}/item
+                </div>
+              ` : ''}
+              ${v.supplierName ? `<div class="text-sm text-gray-600 mt-1">Supplier: ${v.supplierName}</div>` : ''}
+              ${v.purchaseDate ? `<div class="text-sm text-gray-500">Purchased: ${v.purchaseDate}</div>` : ''}
+            </div>
+            <div class="text-right">
+              <div class="text-xl font-bold ${v.stock <= 5 ? 'text-red-600' : 'text-gray-700'}">
+                Stock: ${v.stock}
+              </div>
+              ${v.stock <= 0 ? '<div class="text-sm text-red-600 font-bold">OUT OF STOCK</div>' : ''}
+            </div>
+          </div>
+        </button>
+      `).join('')}
+    </div>
+    <button onclick="closePriceVariantModal()" class="mt-6 w-full bg-gray-300 hover:bg-gray-400 text-gray-800 py-3 rounded-xl font-bold">
+      Cancel
+    </button>
+  `;
+  
+  modal.appendChild(content);
+  document.body.appendChild(modal);
+}
+
+window.selectPriceVariant = (productId) => {
+  const product = productsCache.find(p => p.id === productId);
+  if (product) {
+    if (product.stock <= 0) {
+      alert(`${product.name} is out of stock!`);
+      beep(); beep();
+      return;
+    }
+    
+    const existing = cart.find(i => i.id === product.id);
+    if (existing) existing.qty += 1;
+    else cart.push({ ...product, qty: 1 });
+    updateCart();
+    beep();
+  }
+  closePriceVariantModal();
+};
+
+window.closePriceVariantModal = () => {
+  const modal = document.getElementById('priceVariantModal');
+  if (modal) modal.remove();
+};
 
 function updateCart() {
   const itemsDiv = document.getElementById("cartItems");
