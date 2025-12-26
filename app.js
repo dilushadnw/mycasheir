@@ -1,30 +1,134 @@
 // app.js
 import { auth, db } from "./firebase-config.js";
 import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-auth.js";
-import { collection, doc, onSnapshot, addDoc, updateDoc, query, orderBy, serverTimestamp, increment, setDoc } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore.js";
-import { beep, printReceipt } from "./utils.js";
+import { collection, doc, onSnapshot, addDoc, updateDoc, query, where, orderBy, serverTimestamp, increment, setDoc, getDoc, getDocs } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore.js";
+import { beep, printReceipt, formatLKR } from "./utils.js";
+import { offlineDB } from "./offline-db.js";
 
 let cart = [];
-let settings = { shopName: "My Shop", address: "Your Address", taxRate: 0, currency: "₹" };
+let settings = { shopName: "My Shop", address: "Your Address", taxRate: 0, currency: "LKR" };
+let currentUser = null;
+let userRole = "cashier"; // default role
+let isProcessingSale = false; // Prevent duplicate transactions
+let productsCache = []; // Cache for faster search
+let isOffline = !navigator.onLine; // Track offline status
+
+// Initialize offline database
+offlineDB.init().then(() => {
+  console.log('Offline database initialized');
+}).catch(error => {
+  console.error('Failed to initialize offline database:', error);
+});
+
+// Show offline/online status
+function updateOnlineStatus() {
+  isOffline = !navigator.onLine;
+  const statusDiv = document.getElementById('onlineStatus');
+  if (statusDiv) {
+    if (isOffline) {
+      statusDiv.textContent = '⚠️ OFFLINE MODE';
+      statusDiv.className = 'bg-red-500 text-white px-4 py-2 rounded-lg font-bold text-sm';
+    } else {
+      statusDiv.textContent = '✓ ONLINE';
+      statusDiv.className = 'bg-green-500 text-white px-4 py-2 rounded-lg font-bold text-sm';
+    }
+  }
+}
+
+window.addEventListener('online', updateOnlineStatus);
+window.addEventListener('offline', updateOnlineStatus);
+
+// Sync sale to Firebase (called by offline-db.js)
+window.syncSaleToFirebase = async (sale) => {
+  try {
+    // Remove local IndexedDB fields before syncing
+    const { id, synced, offlineCreated, localTimestamp, syncedAt, ...firebaseSale } = sale;
+    
+    // Add to Firebase
+    await addDoc(collection(db, "sales"), firebaseSale);
+    return true;
+  } catch (error) {
+    console.error('Failed to sync sale to Firebase:', error);
+    throw error;
+  }
+};
 
 window.login = async () => {
   const email = document.getElementById("email").value.trim();
   const pass = document.getElementById("password").value;
+  const errorDiv = document.getElementById("loginError");
+  
+  if (!email || !pass) {
+    errorDiv.textContent = "Please enter email and password";
+    errorDiv.classList.remove("hidden");
+    return;
+  }
+  
   try {
     await signInWithEmailAndPassword(auth, email, pass);
-  } catch {
-    alert("Wrong login! Go to Firebase → Authentication → Users → Add user (admin@shop.com / 123456)");
+    errorDiv.classList.add("hidden");
+  } catch (error) {
+    let errorMessage = "Login failed! ";
+    if (error.code === "auth/user-not-found") {
+      errorMessage += "User not found. Please check your email.";
+    } else if (error.code === "auth/wrong-password") {
+      errorMessage += "Incorrect password.";
+    } else if (error.code === "auth/invalid-email") {
+      errorMessage += "Invalid email format.";
+    } else {
+      errorMessage += error.message;
+    }
+    errorDiv.textContent = errorMessage;
+    errorDiv.classList.remove("hidden");
   }
 };
 
-window.logout = () => signOut(auth);
+window.logout = () => {
+  if (confirm("Are you sure you want to logout?")) {
+    signOut(auth);
+  }
+};
 
-onAuthStateChanged(auth, user => {
+window.toggleSetupInstructions = () => {
+  const instructions = document.getElementById("setupInstructions");
+  instructions.classList.toggle("hidden");
+};
+
+async function getUserRole(userId) {
+  try {
+    const userDoc = await getDoc(doc(db, "users", userId));
+    if (userDoc.exists()) {
+      return userDoc.data().role || "cashier";
+    }
+    // Default role if not found
+    return "cashier";
+  } catch (error) {
+    console.error("Error getting user role:", error);
+    return "cashier";
+  }
+}
+
+onAuthStateChanged(auth, async user => {
   if (user) {
+    currentUser = user;
+    // Get user role
+    userRole = await getUserRole(user.uid);
+    
+    // Update UI based on role
+    document.getElementById("userRole").textContent = userRole.toUpperCase();
+    
+    // Hide products link for cashier
+    if (userRole === "cashier") {
+      document.getElementById("productsLink").style.display = "none";
+    }
+    
     document.getElementById("loginScreen").classList.add("hidden");
     document.getElementById("app").classList.remove("hidden");
     loadSettings();
     loadProducts();
+  } else {
+    currentUser = null;
+    userRole = "cashier";
   }
 });
 
@@ -39,50 +143,151 @@ function loadSettings() {
 }
 
 function loadProducts() {
+  const searchInput = document.getElementById("search");
+  let searchListener = null;
+  let enterListener = null;
+  
+  // Load from offline DB first for faster initial load
+  if (offlineDB.db) {
+    offlineDB.getAllProducts().then(products => {
+      if (products && products.length > 0) {
+        console.log(`Loaded ${products.length} products from offline cache`);
+        productsCache = products;
+        renderProductsGrid(products);
+      }
+    }).catch(err => console.error('Error loading offline products:', err));
+  }
+  
+  // Then sync with Firebase (online mode) 
   onSnapshot(query(collection(db, "products"), orderBy("name")), snap => {
     const grid = document.getElementById("productsGrid");
-    grid.innerHTML = "";
+    
+    // Clear cache and rebuild
+    productsCache = [];
+    const products = [];
+    const fragment = document.createDocumentFragment(); // Use fragment for better performance
+    
     snap.forEach(d => {
       const p = d.data(); 
       p.id = d.id;
-
+      productsCache.push(p); // Cache products for search
+      products.push(p);
+      
       const div = document.createElement("div");
       div.className = `bg-white p-8 rounded-3xl shadow-2xl text-center cursor-pointer hover:scale-110 transition-all duration-200 ${p.stock <= 5 ? 'border-8 border-red-500 animate-pulse' : 'border-4 border-transparent'}`;
+      div.dataset.productId = p.id;
+      div.dataset.productName = (p.name || "").toLowerCase();
+      div.dataset.productBarcode = (p.barcode || "").toLowerCase();
+      div.dataset.productCategory = (p.category || "").toLowerCase();
       
-      // THIS IS THE FIX → use onclick on the main div + prevent event bubbling
       div.onclick = (e) => {
-        e.stopPropagation();  // prevents issues
-        beep();
-        const existing = cart.find(i => i.id === p.id);
-        if (existing) existing.qty += 1;
-        else cart.push({ ...p, qty: 1 });
-        updateCart();
+        e.stopPropagation();
+        addToCart(p);
       };
 
+      const price = p.sellingPrice || p.price || 0;
       div.innerHTML = `
         <div class="text-2xl font-bold text-gray-800 mb-2">${p.name}</div>
-        <div class="text-4xl font-bold text-green-600">${settings.currency}${p.price}</div>
+        <div class="text-4xl font-bold text-green-600">${formatLKR(price)}</div>
         <div class="text-xl mt-3 ${p.stock <= 5 ? 'text-red-600 font-bold' : 'text-gray-600'}">
           Stock: ${p.stock}
         </div>
+        ${p.category ? `<div class="text-sm text-gray-500 mt-1">${p.category}</div>` : ''}
+        ${p.priceVariant ? '<div class="text-xs bg-purple-100 text-purple-700 px-2 py-1 rounded mt-1">Multiple Prices</div>' : ''}
       `;
 
-      grid.appendChild(div);
+      fragment.appendChild(div);
     });
-  });
-
-  // Barcode scanner (Enter key)
-  document.getElementById("search").addEventListener("keypress", e => {
-    if (e.key === "Enter") {
-      const term = e.target.value.trim().toLowerCase();
-      const foundCard = [...document.querySelectorAll("#productsGrid > div")].find(card => 
-        card.textContent.toLowerCase().includes(term)
+    
+    grid.innerHTML = "";
+    grid.appendChild(fragment);
+    
+    // Save products to offline DB for offline access
+    if (offlineDB.db && products.length > 0) {
+      offlineDB.saveProducts(products).catch(err => 
+        console.error('Error saving products to offline DB:', err)
       );
-      if (foundCard) {
-        foundCard.click();  // triggers the onclick above
-        e.target.value = "";
-      }
     }
+    
+    // Remove old listeners to prevent duplicates
+    if (searchListener) searchInput.removeEventListener("input", searchListener);
+    if (enterListener) searchInput.removeEventListener("keypress", enterListener);
+    
+    // Optimized search with debouncing
+    let searchTimeout;
+    searchListener = (e) => {
+      clearTimeout(searchTimeout);
+      searchTimeout = setTimeout(() => {
+        const term = e.target.value.trim().toLowerCase();
+        if (!term) {
+          document.querySelectorAll("#productsGrid > div").forEach(card => card.style.display = "block");
+          return;
+        }
+        
+        // Fast search using dataset attributes
+        document.querySelectorAll("#productsGrid > div").forEach(card => {
+          const matchesName = card.dataset.productName.includes(term);
+          const matchesBarcode = card.dataset.productBarcode.includes(term);
+          const matchesCategory = card.dataset.productCategory.includes(term);
+          card.style.display = (matchesName || matchesBarcode || matchesCategory) ? "block" : "none";
+        });
+      }, 150); // 150ms debounce for responsive feel
+    };
+    
+    // High-speed barcode scanner (Enter key)
+    enterListener = (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        const term = e.target.value.trim().toLowerCase();
+        
+        if (!term) return;
+        
+        // Optimized search from cache - search barcode first (exact match), then name
+        let foundProduct = productsCache.find(p => 
+          p.barcode && p.barcode.toLowerCase() === term
+        );
+        
+        if (!foundProduct) {
+          foundProduct = productsCache.find(p => 
+            p.name.toLowerCase().includes(term)
+          );
+        }
+        
+        if (!foundProduct && term) {
+          foundProduct = productsCache.find(p => 
+            (p.category || "").toLowerCase().includes(term)
+          );
+        }
+        
+        if (foundProduct) {
+          if (foundProduct.stock <= 0) {
+            alert(`${foundProduct.name} is out of stock!`);
+            beep(); beep();
+            e.target.value = "";
+            return;
+          }
+          
+          beep();
+          const existing = cart.find(i => i.id === foundProduct.id);
+          if (existing) existing.qty += 1;
+          else cart.push({ ...foundProduct, qty: 1 });
+          updateCart();
+          e.target.value = "";
+          
+          // Reset search filter
+          document.querySelectorAll("#productsGrid > div").forEach(card => card.style.display = "block");
+        } else {
+          alert("Product not found!");
+          beep(); beep();
+        }
+      }
+    };
+    
+    searchInput.addEventListener("input", searchListener);
+    searchInput.addEventListener("keypress", enterListener);
+    
+    // Auto-focus search input for barcode scanner
+    searchInput.focus();
   });
 }
   
@@ -90,68 +295,650 @@ function loadProducts() {
 
 function addToCart(p) {
   beep();
-  const existing = cart.find(i => i.id === p.id);
-  if (existing) existing.qty += 1;
-  else cart.push({ ...p, qty: 1 });
-  updateCart();
+  
+  // Check if product has multiple price variants
+  const variants = productsCache.filter(prod => 
+    prod.name === p.name && (prod.priceVariant || prod.id === p.id)
+  );
+  
+  if (variants.length > 1) {
+    // Show modal to select price variant
+    showPriceVariantModal(variants);
+  } else {
+    // Single product, add directly
+    const existing = cart.find(i => i.id === p.id);
+    if (existing) existing.qty += 1;
+    else cart.push({ ...p, qty: 1 });
+    updateCart();
+  }
 }
+
+function showPriceVariantModal(variants) {
+  // Create modal HTML
+  const modal = document.createElement('div');
+  modal.id = 'priceVariantModal';
+  modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
+  modal.onclick = (e) => {
+    if (e.target === modal) modal.remove();
+  };
+  
+  const content = document.createElement('div');
+  content.className = 'bg-white p-8 rounded-3xl shadow-2xl max-w-2xl w-full mx-4';
+  content.onclick = (e) => e.stopPropagation();
+  
+  content.innerHTML = `
+    <h2 class="text-3xl font-bold mb-6 text-indigo-700">Select Price Variant for ${variants[0].name}</h2>
+    <div class="space-y-4 max-h-96 overflow-y-auto">
+      ${variants.map(v => `
+        <button onclick="selectPriceVariant('${v.id}')" class="w-full p-6 border-4 border-gray-200 rounded-xl hover:border-indigo-600 hover:bg-indigo-50 transition text-left">
+          <div class="flex justify-between items-start">
+            <div class="flex-1">
+              <div class="text-2xl font-bold text-gray-800">
+                ${v.buyingPrice !== undefined ? `Buy: ${formatLKR(v.buyingPrice)}` : ''}
+                ${v.sellingPrice !== undefined ? ` → Sell: ${formatLKR(v.sellingPrice)}` : formatLKR(v.price || 0)}
+              </div>
+              ${v.buyingPrice !== undefined && v.sellingPrice !== undefined ? `
+                <div class="text-sm text-green-600 mt-1">
+                  Profit: ${formatLKR(v.sellingPrice - v.buyingPrice)}/item
+                </div>
+              ` : ''}
+              ${v.supplierName ? `<div class="text-sm text-gray-600 mt-1">Supplier: ${v.supplierName}</div>` : ''}
+              ${v.purchaseDate ? `<div class="text-sm text-gray-500">Purchased: ${v.purchaseDate}</div>` : ''}
+            </div>
+            <div class="text-right">
+              <div class="text-xl font-bold ${v.stock <= 5 ? 'text-red-600' : 'text-gray-700'}">
+                Stock: ${v.stock}
+              </div>
+              ${v.stock <= 0 ? '<div class="text-sm text-red-600 font-bold">OUT OF STOCK</div>' : ''}
+            </div>
+          </div>
+        </button>
+      `).join('')}
+    </div>
+    <button onclick="closePriceVariantModal()" class="mt-6 w-full bg-gray-300 hover:bg-gray-400 text-gray-800 py-3 rounded-xl font-bold">
+      Cancel
+    </button>
+  `;
+  
+  modal.appendChild(content);
+  document.body.appendChild(modal);
+}
+
+window.selectPriceVariant = (productId) => {
+  const product = productsCache.find(p => p.id === productId);
+  if (product) {
+    if (product.stock <= 0) {
+      alert(`${product.name} is out of stock!`);
+      beep(); beep();
+      return;
+    }
+    
+    const existing = cart.find(i => i.id === product.id);
+    if (existing) existing.qty += 1;
+    else cart.push({ ...product, qty: 1 });
+    updateCart();
+    beep();
+  }
+  closePriceVariantModal();
+};
+
+window.closePriceVariantModal = () => {
+  const modal = document.getElementById('priceVariantModal');
+  if (modal) modal.remove();
+};
 
 function updateCart() {
   const itemsDiv = document.getElementById("cartItems");
   itemsDiv.innerHTML = "";
-  let total = 0;
+  let subtotal = 0;
 
   cart.forEach((item, i) => {
-    total += item.price * item.qty;
+    subtotal += item.price * item.qty;
     const div = document.createElement("div");
-    div.className = "bg-gray-50 p-4 rounded-xl flex justify-between items-center";
+    div.className = "bg-gray-50 p-3 rounded-lg flex justify-between items-center gap-2";
     div.innerHTML = `
-      <div>
-        <div class="font-bold text-xl">${item.name}</div>
-        <div>${settings.currency}${item.price} × ${item.qty}</div>
+      <div class="flex-1 min-w-0">
+        <div class="font-bold text-base truncate">${item.name}</div>
+        <div class="text-gray-600 text-sm">${formatLKR(item.price)} × ${item.qty} = ${formatLKR(item.price * item.qty)}</div>
       </div>
-      <div class="text-2xl font-bold">${settings.currency}${(item.price * item.qty).toFixed(2)}</div>
-      <div class="flex gap-2">
-        <button onclick="cart[${i}].qty++; updateCart()" class="bg-green-600 text-white w-10 h-10 rounded-full text-2xl">+</button>
-        <button onclick="cart[${i}].qty--; if(cart[${i}].qty<=0) cart.splice(${i},1); updateCart()" class="bg-red-600 text-white w-10 h-10 rounded-full text-2xl">−</button>
+      <div class="flex gap-1 items-center">
+        <button class="qty-minus bg-red-600 text-white w-8 h-8 rounded-full text-lg hover:bg-red-700 font-bold flex items-center justify-center" data-index="${i}">−</button>
+        <input type="number" class="qty-input w-12 text-center border rounded text-base font-bold p-1" value="${item.qty}" min="1" data-index="${i}"/>
+        <button class="qty-plus bg-green-600 text-white w-8 h-8 rounded-full text-lg hover:bg-green-700 font-bold flex items-center justify-center" data-index="${i}">+</button>
+        <button class="remove-item bg-red-500 text-white w-8 h-8 rounded-lg hover:bg-red-600 font-bold flex items-center justify-center ml-1" data-index="${i}">
+          <i class="fas fa-trash text-xs"></i>
+        </button>
       </div>
     `;
     itemsDiv.appendChild(div);
   });
 
-  document.getElementById("total").textContent = settings.currency + total.toFixed(2);
+  // Add event listeners for cart controls
+  document.querySelectorAll(".qty-plus").forEach(btn => {
+    btn.addEventListener("click", function() {
+      const index = parseInt(this.getAttribute("data-index"));
+      if (cart[index]) {
+        cart[index].qty++;
+        updateCart();
+      }
+    });
+  });
+
+  document.querySelectorAll(".qty-minus").forEach(btn => {
+    btn.addEventListener("click", function() {
+      const index = parseInt(this.getAttribute("data-index"));
+      if (cart[index]) {
+        cart[index].qty--;
+        if (cart[index].qty <= 0) {
+          cart.splice(index, 1);
+        }
+        updateCart();
+      }
+    });
+  });
+
+  document.querySelectorAll(".qty-input").forEach(input => {
+    input.addEventListener("change", function() {
+      const index = parseInt(this.getAttribute("data-index"));
+      const newQty = parseInt(this.value) || 1;
+      if (cart[index] && newQty > 0) {
+        cart[index].qty = newQty;
+        updateCart();
+      }
+    });
+  });
+
+  document.querySelectorAll(".remove-item").forEach(btn => {
+    btn.addEventListener("click", function() {
+      const index = parseInt(this.getAttribute("data-index"));
+      cart.splice(index, 1);
+      updateCart();
+    });
+  });
+  
+  // Add item discount button listeners
+  document.querySelectorAll(".item-discount").forEach(btn => {
+    btn.addEventListener("click", function() {
+      const index = parseInt(this.getAttribute("data-index"));
+      showItemDiscountModal(index);
+    });
+  });
+
+  // Calculate discount
+  const discountAmount = parseFloat(document.getElementById("discountAmount")?.value) || 0;
+  const discountType = document.getElementById("discountType")?.value || "fixed";
+  
+  let discountValue = 0;
+  if (discountAmount > 0) {
+    if (discountType === "percent") {
+      discountValue = (subtotal * discountAmount) / 100;
+      document.getElementById("discountInfo").textContent = `Discount: ${discountAmount}% = ${formatLKR(discountValue)}`;
+    } else {
+      discountValue = discountAmount;
+      document.getElementById("discountInfo").textContent = `Discount: ${formatLKR(discountValue)}`;
+    }
+  } else {
+    document.getElementById("discountInfo").textContent = "No discount applied";
+  }
+  
+  const total = Math.max(0, subtotal - discountValue);
+  
+  document.getElementById("subtotal").textContent = formatLKR(subtotal);
+  document.getElementById("total").textContent = formatLKR(total);
   document.getElementById("cartCount").textContent = cart.reduce((s,i)=>s+i.qty,0);
 
   const tendered = parseFloat(document.getElementById("cashTendered").value) || 0;
-  document.getElementById("change").textContent = settings.currency + (tendered - total).toFixed(2);
+  document.getElementById("change").textContent = formatLKR(tendered - total);
 }
 
 document.getElementById("cashTendered").oninput = updateCart;
 
+// Add discount input listeners
+setTimeout(() => {
+  const discountAmountInput = document.getElementById("discountAmount");
+  const discountTypeSelect = document.getElementById("discountType");
+  
+  if (discountAmountInput) discountAmountInput.oninput = updateCart;
+  if (discountTypeSelect) discountTypeSelect.onchange = updateCart;
+}, 500);
+
+// Item discount modal
+function showItemDiscountModal(index) {
+  const item = cart[index];
+  if (!item) return;
+  
+  const modal = document.createElement('div');
+  modal.id = 'itemDiscountModal';
+  modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
+  
+  modal.innerHTML = `
+    <div class="bg-white p-8 rounded-3xl shadow-2xl max-w-md w-full mx-4">
+      <h2 class="text-2xl font-bold mb-6 text-indigo-700">Discount for ${item.name}</h2>
+      <div class="mb-4">
+        <label class="block text-sm font-bold mb-2">Item Total: ${formatLKR(item.price * item.qty)}</label>
+        <input type="number" id="itemDiscountAmount" placeholder="Discount Amount" class="w-full p-4 border-2 rounded-xl text-lg mb-3" step="0.01" min="0" value="${item.discount || 0}"/>
+        <select id="itemDiscountType" class="w-full p-4 border-2 rounded-xl text-lg mb-3">
+          <option value="fixed">Fixed Amount (LKR)</option>
+          <option value="percent">Percentage (%)</option>
+        </select>
+        <div id="itemDiscPreview" class="text-lg font-bold text-green-600 mb-4"></div>
+      </div>
+      <div class="flex gap-3">
+        <button onclick="applyItemDiscount(${index})" class="flex-1 bg-green-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-green-700">
+          <i class="fas fa-check mr-2"></i>Apply
+        </button>
+        <button onclick="closeItemDiscountModal()" class="flex-1 bg-gray-500 text-white px-6 py-3 rounded-xl font-bold hover:bg-gray-600">
+          Cancel
+        </button>
+      </div>
+    </div>
+  `;
+  
+  document.body.appendChild(modal);
+  
+  // Add listeners for preview
+  const amtInput = document.getElementById('itemDiscountAmount');
+  const typeSelect = document.getElementById('itemDiscountType');
+  const preview = document.getElementById('itemDiscPreview');
+  
+  function updatePreview() {
+    const amt = parseFloat(amtInput.value) || 0;
+    const type = typeSelect.value;
+    const itemTotal = item.price * item.qty;
+    let discValue = 0;
+    
+    if (type === 'percent') {
+      discValue = (itemTotal * amt) / 100;
+      preview.textContent = `Discount: ${amt}% = ${formatLKR(discValue)}`;
+    } else {
+      discValue = amt;
+      preview.textContent = `Discount: ${formatLKR(discValue)}`;
+    }
+    preview.textContent += ` | Net: ${formatLKR(itemTotal - discValue)}`;
+  }
+  
+  amtInput.oninput = updatePreview;
+  typeSelect.onchange = updatePreview;
+  updatePreview();
+}
+
+window.applyItemDiscount = (index) => {
+  const amt = parseFloat(document.getElementById('itemDiscountAmount').value) || 0;
+  const type = document.getElementById('itemDiscountType').value;
+  const item = cart[index];
+  
+  if (type === 'percent') {
+    cart[index].discount = (item.price * item.qty * amt) / 100;
+  } else {
+    cart[index].discount = amt;
+  }
+  
+  closeItemDiscountModal();
+  updateCart();
+  beep();
+};
+
+window.closeItemDiscountModal = () => {
+  const modal = document.getElementById('itemDiscountModal');
+  if (modal) modal.remove();
+};
+
+// Cart discount modal
+window.showCartDiscountModal = () => {
+  const modal = document.createElement('div');
+  modal.id = 'cartDiscountModal';
+  modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
+  
+  const currentDiscount = parseFloat(document.getElementById('discountAmount').value) || 0;
+  const currentType = document.getElementById('discountType').value || 'fixed';
+  
+  modal.innerHTML = `
+    <div class="bg-white p-8 rounded-3xl shadow-2xl max-w-md w-full mx-4">
+      <h2 class="text-2xl font-bold mb-6 text-indigo-700">Cart Discount</h2>
+      <div class="mb-4">
+        <label class="block text-sm font-bold mb-2">Subtotal: <span id="modalSubtotal">LKR 0.00</span></label>
+        <input type="number" id="cartDiscountAmount" placeholder="Discount Amount" class="w-full p-4 border-2 rounded-xl text-lg mb-3" step="0.01" min="0" value="${currentDiscount}"/>
+        <select id="cartDiscountType" class="w-full p-4 border-2 rounded-xl text-lg mb-3">
+          <option value="fixed" ${currentType === 'fixed' ? 'selected' : ''}>Fixed Amount (LKR)</option>
+          <option value="percent" ${currentType === 'percent' ? 'selected' : ''}>Percentage (%)</option>
+        </select>
+        <div id="cartDiscPreview" class="text-lg font-bold text-green-600 mb-4"></div>
+      </div>
+      <div class="flex gap-3">
+        <button onclick="applyCartDiscount()" class="flex-1 bg-green-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-green-700">
+          <i class="fas fa-check mr-2"></i>Apply
+        </button>
+        <button onclick="removeCartDiscount()" class="flex-1 bg-red-500 text-white px-6 py-3 rounded-xl font-bold hover:bg-red-600">
+          Remove
+        </button>
+        <button onclick="closeCartDiscountModal()" class="flex-1 bg-gray-500 text-white px-6 py-3 rounded-xl font-bold hover:bg-gray-600">
+          Cancel
+        </button>
+      </div>
+    </div>
+  `;
+  
+  document.body.appendChild(modal);
+  
+  // Calculate and show subtotal
+  const subtotal = cart.reduce((sum, item) => sum + (item.price * item.qty - (item.discount || 0)), 0);
+  document.getElementById('modalSubtotal').textContent = formatLKR(subtotal);
+  
+  // Add listeners for preview
+  const amtInput = document.getElementById('cartDiscountAmount');
+  const typeSelect = document.getElementById('cartDiscountType');
+  const preview = document.getElementById('cartDiscPreview');
+  
+  function updatePreview() {
+    const amt = parseFloat(amtInput.value) || 0;
+    const type = typeSelect.value;
+    let discValue = 0;
+    
+    if (type === 'percent') {
+      discValue = (subtotal * amt) / 100;
+      preview.textContent = `Discount: ${amt}% = ${formatLKR(discValue)}`;
+    } else {
+      discValue = amt;
+      preview.textContent = `Discount: ${formatLKR(discValue)}`;
+    }
+    preview.textContent += ` | Total: ${formatLKR(subtotal - discValue)}`;
+  }
+  
+  amtInput.oninput = updatePreview;
+  typeSelect.onchange = updatePreview;
+  updatePreview();
+};
+
+window.applyCartDiscount = () => {
+  const amt = parseFloat(document.getElementById('cartDiscountAmount').value) || 0;
+  const type = document.getElementById('cartDiscountType').value;
+  
+  document.getElementById('discountAmount').value = amt;
+  document.getElementById('discountType').value = type;
+  
+  closeCartDiscountModal();
+  updateCart();
+  beep();
+};
+
+window.removeCartDiscount = () => {
+  document.getElementById('discountAmount').value = 0;
+  document.getElementById('discountType').value = 'fixed';
+  closeCartDiscountModal();
+  updateCart();
+  beep();
+};
+
+window.closeCartDiscountModal = () => {
+  const modal = document.getElementById('cartDiscountModal');
+  if (modal) modal.remove();
+};
+
+// Clear cart function
+window.clearCart = () => {
+  if (cart.length === 0) return;
+  if (confirm(`Clear all ${cart.length} items from cart?`)) {
+    cart = [];
+    updateCart();
+    beep();
+  }
+};
+
+// Help modal functions
+window.showHelp = () => {
+  document.getElementById("helpModal").classList.remove("hidden");
+};
+
+window.closeHelp = () => {
+  document.getElementById("helpModal").classList.add("hidden");
+};
+
+// Keyboard shortcuts
+document.addEventListener("keydown", (e) => {
+  // F1 - Show help
+  if (e.key === "F1") {
+    e.preventDefault();
+    window.showHelp();
+  }
+  
+  // F2 - Focus cash tendered input
+  if (e.key === "F2") {
+    e.preventDefault();
+    document.getElementById("cashTendered").focus();
+    document.getElementById("cashTendered").select();
+  }
+  
+  // F3 - Show cart discount modal
+  if (e.key === "F3") {
+    e.preventDefault();
+    window.showCartDiscountModal();
+  }
+  
+  // F4 - Focus first quantity input in cart
+  if (e.key === "F4") {
+    e.preventDefault();
+    const firstQtyInput = document.querySelector(".qty-input");
+    if (firstQtyInput) {
+      firstQtyInput.focus();
+      firstQtyInput.select();
+    }
+  }
+  
+  // F9 or Ctrl+Enter - Complete sale
+  if (e.key === "F9" || (e.ctrlKey && e.key === "Enter")) {
+    e.preventDefault();
+    if (cart.length > 0) {
+      window.completeSale();
+    }
+  }
+  
+  // Escape - Clear search and refocus
+  if (e.key === "Escape") {
+    const searchInput = document.getElementById("search");
+    searchInput.value = "";
+    searchInput.focus();
+    // Reset product display filter
+    document.querySelectorAll("#productsGrid > div").forEach(card => card.style.display = "block");
+  }
+  
+  // Ctrl+K - Focus search
+  if (e.ctrlKey && e.key === "k") {
+    e.preventDefault();
+    document.getElementById("search").focus();
+    document.getElementById("search").select();
+  }
+});
+
+// Transaction ID generator
+async function generateTransactionId() {
+  const today = new Date();
+  const dateStr = today.getFullYear() + 
+                  String(today.getMonth() + 1).padStart(2, '0') + 
+                  String(today.getDate()).padStart(2, '0');
+  
+  // Get today's transaction count from Firestore
+  try {
+    const todayStart = new Date(today.setHours(0, 0, 0, 0));
+    const todayEnd = new Date(today.setHours(23, 59, 59, 999));
+    
+    const salesQuery = query(
+      collection(db, "sales"),
+      where("timestamp", ">=", todayStart),
+      where("timestamp", "<=", todayEnd)
+    );
+    
+    const snapshot = await getDocs(salesQuery);
+    const count = snapshot.size + 1;
+    const seqNum = String(count).padStart(3, '0');
+    
+    return `TXN${dateStr}-${seqNum}`;
+  } catch (error) {
+    // Fallback if query fails
+    const fallbackSeq = String(Math.floor(Math.random() * 999) + 1).padStart(3, '0');
+    return `TXN${dateStr}-${fallbackSeq}`;
+  }
+}
+
 window.completeSale = async () => {
-  if (cart.length === 0) return alert("Cart is empty!");
-
-  const total = parseFloat(document.getElementById("total").textContent.replace(settings.currency, ""));
-  const tendered = parseFloat(document.getElementById("cashTendered").value) || 0;
-  if (tendered < total) return alert("Not enough cash!");
-
-  // Deduct stock
-  for (const item of cart) {
-    await updateDoc(doc(db, "products", item.id), { stock: increment(-item.qty) });
+  // Prevent duplicate transactions
+  if (isProcessingSale) {
+    console.log("Sale already in progress");
+    return;
+  }
+  
+  // Empty cart validation
+  if (cart.length === 0) {
+    alert("Cart is empty! Please add items to cart.");
+    return;
   }
 
-  // Save sale
-  const sale = {
-    items: cart.map(i => ({ name: i.name, price: i.price, qty: i.qty })),
-    total, tendered, change: tendered - total,
-    paymentMethod: "Cash",
-    timestamp: serverTimestamp()
-  };
-  await addDoc(collection(db, "sales"), sale);
+  // Get total and validate data (remove all non-numeric except first decimal point)
+  const totalText = document.getElementById("total").textContent.replace(/[^\d.-]/g, "").replace(/\.(?=.*\.)/g, "");
+  const total = parseFloat(totalText);
+  
+  if (isNaN(total) || total <= 0) {
+    alert("Invalid total amount!");
+    return;
+  }
+  
+  const tendered = parseFloat(document.getElementById("cashTendered").value) || 0;
+  
+  if (tendered < total) {
+    alert(`Insufficient payment!\nTotal: ${formatLKR(total)}\nTendered: ${formatLKR(tendered)}\nShortfall: ${formatLKR(total - tendered)}`);
+    return;
+  }
 
-  printReceipt(sale, settings);
-  cart = [];
-  document.getElementById("cashTendered").value = "";
-  updateCart();
-  beep(); beep(); beep();
+  // Disable button and set processing flag
+  isProcessingSale = true;
+  const completeBtn = document.querySelector('button[onclick="completeSale()"]');
+  if (completeBtn) {
+    completeBtn.disabled = true;
+    completeBtn.style.opacity = "0.5";
+    completeBtn.textContent = "Processing...";
+  }
+
+  try {
+    // Check stock availability (use offline DB if offline)
+    for (const item of cart) {
+      let currentStock = 0;
+      
+      if (isOffline && offlineDB.db) {
+        // Check offline DB
+        const offlineProduct = await offlineDB.getProduct(item.id);
+        if (!offlineProduct) {
+          throw new Error(`Product ${item.name} not found in offline database!`);
+        }
+        currentStock = offlineProduct.stock;
+      } else {
+        // Check Firebase
+        const productDoc = await getDoc(doc(db, "products", item.id));
+        if (!productDoc.exists()) {
+          throw new Error(`Product ${item.name} not found!`);
+        }
+        currentStock = productDoc.data().stock;
+      }
+      
+      if (currentStock < item.qty) {
+        throw new Error(`Insufficient stock for ${item.name}!\nRequested: ${item.qty}, Available: ${currentStock}`);
+      }
+    }
+
+    // Generate sequential transaction ID
+    const transactionId = await generateTransactionId();
+    
+    // Calculate discount and subtotal
+    const subtotalText = document.getElementById("subtotal").textContent.replace(/[^\d.-]/g, "").replace(/\.(?=.*\.)/g, "");
+    const subtotal = parseFloat(subtotalText);
+    const discountAmount = parseFloat(document.getElementById("discountAmount")?.value) || 0;
+    const discountType = document.getElementById("discountType")?.value || "fixed";
+    
+    let discountValue = 0;
+    if (discountAmount > 0) {
+      if (discountType === "percent") {
+        discountValue = (subtotal * discountAmount) / 100;
+      } else {
+        discountValue = discountAmount;
+      }
+    }
+    
+    // Deduct stock (online or offline)
+    for (const item of cart) {
+      if (isOffline && offlineDB.db) {
+        // Update offline DB
+        await offlineDB.updateProductStock(item.id, -item.qty);
+      } else {
+        // Update Firebase
+        await updateDoc(doc(db, "products", item.id), { 
+          stock: increment(-item.qty) 
+        });
+      }
+    }
+
+    // Save sale with user tracking and discount
+    const sale = {
+      transactionId,
+      items: cart.map(i => ({ 
+        name: i.name, 
+        price: i.price, 
+        qty: i.qty,
+        productId: i.id,
+        category: i.category || "Uncategorized"
+      })),
+      subtotal,
+      discount: discountValue,
+      discountType: discountValue > 0 ? discountType : null,
+      discountAmount: discountValue > 0 ? discountAmount : 0,
+      total,
+      tendered, 
+      change: tendered - total,
+      paymentMethod: "Cash",
+      timestamp: isOffline ? new Date() : serverTimestamp(),
+      userId: currentUser?.uid || "guest",
+      userEmail: currentUser?.email || "guest",
+      userName: currentUser?.displayName || currentUser?.email || "Guest User"
+    };
+    
+    // Save to Firebase (online) or IndexedDB (offline)
+    if (isOffline && offlineDB.db) {
+      // Save to offline database (optimized - no extra queries)
+      const offlineSaveStart = Date.now();
+      await offlineDB.saveSale(sale);
+      const offlineSaveTime = Date.now() - offlineSaveStart;
+      console.log(`Offline save completed in ${offlineSaveTime}ms`);
+      alert(`Sale saved offline!\nTransaction ID: ${transactionId}\n\n⚠️ Will sync to server when online\nChange: ${formatLKR(tendered - total)}`);
+    } else {
+      // Save to Firebase
+      await addDoc(collection(db, "sales"), sale);
+      alert(`Sale completed successfully!\nTransaction ID: ${transactionId}\nChange: ${formatLKR(tendered - total)}`);
+    }
+
+    printReceipt({ ...sale, transactionId }, settings);
+    
+    cart = [];
+    document.getElementById("cashTendered").value = "";
+    document.getElementById("discountAmount").value = "0";
+    updateCart();
+    
+    // Re-enable and focus cash tendered input
+    setTimeout(() => {
+      const cashInput = document.getElementById("cashTendered");
+      if (cashInput) {
+        cashInput.disabled = false;
+        cashInput.focus();
+      }
+    }, 100);
+    
+    beep(); beep(); beep();
+  } catch (error) {
+    alert("Error completing sale: " + error.message);
+    console.error("Sale error:", error);
+  } finally {
+    // Re-enable button
+    isProcessingSale = false;
+    if (completeBtn) {
+      completeBtn.disabled = false;
+      completeBtn.style.opacity = "1";
+      completeBtn.innerHTML = '<i class="fas fa-check-circle mr-2"></i>COMPLETE SALE<div class="text-xs font-normal mt-1 opacity-75">(Press F9 or Ctrl+Enter)</div>';
+    }
+  }
 };

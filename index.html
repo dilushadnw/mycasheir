@@ -12,10 +12,51 @@
 <!-- LOGIN -->
 <div id="loginScreen" class="min-h-screen flex items-center justify-center bg-gradient-to-br from-indigo-600 to-purple-700">
   <div class="bg-white p-12 rounded-3xl shadow-2xl w-96 text-center">
-    <h1 class="text-5xl font-bold text-indigo-700 mb-8">Shop Cashier</h1>
-    <input type="email" id="email" class="w-full p-4 text-xl border-2 rounded-xl mb-4" value="admin@shop.com" placeholder="Email"/>
-    <input type="password" id="password" class="w-full p-4 text-xl border-2 rounded-xl mb-6" value="123456" placeholder="Password"/>
-    <button onclick="login()" class="w-full bg-indigo-600 text-white py-5 rounded-xl text-2xl font-bold hover:bg-indigo-700">LOGIN</button>
+    <div class="mb-8">
+      <i class="fas fa-cash-register text-6xl text-indigo-700 mb-4"></i>
+      <h1 class="text-5xl font-bold text-indigo-700">Shop Cashier Pro</h1>
+    </div>
+    <div id="loginError" class="hidden bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-xl mb-4"></div>
+    <input type="email" id="email" class="w-full p-4 text-xl border-2 rounded-xl mb-4" placeholder="Email" autocomplete="email"/>
+    <input type="password" id="password" class="w-full p-4 text-xl border-2 rounded-xl mb-6" placeholder="Password" autocomplete="current-password"/>
+    <button onclick="login()" class="w-full bg-indigo-600 text-white py-5 rounded-xl text-2xl font-bold hover:bg-indigo-700 transition">
+      <i class="fas fa-sign-in-alt mr-2"></i>LOGIN
+    </button>
+    
+    <!-- Setup Instructions -->
+    <div class="mt-6 text-left">
+      <button onclick="toggleSetupInstructions()" class="text-sm text-indigo-600 hover:text-indigo-800 font-semibold flex items-center justify-center w-full">
+        <i class="fas fa-question-circle mr-2"></i>How to setup admin account?
+      </button>
+      <div id="setupInstructions" class="hidden mt-4 bg-blue-50 p-4 rounded-xl text-sm text-left">
+        <h3 class="font-bold text-blue-900 mb-2">Quick Setup Guide:</h3>
+        <ol class="list-decimal list-inside space-y-2 text-blue-800">
+          <li><strong>Firebase Console</strong> → Authentication → Users → Add user
+            <div class="ml-6 mt-1 text-xs">
+              Admin: <code class="bg-white px-1">admin@shop.com</code> / <code class="bg-white px-1">admin123</code><br>
+              Cashier: <code class="bg-white px-1">cashier@shop.com</code> / <code class="bg-white px-1">cashier123</code>
+            </div>
+          </li>
+          <li><strong>Firestore Database</strong> → Create collection <code class="bg-white px-1">users</code>
+            <div class="ml-6 mt-1 text-xs">
+              Document ID: <code class="bg-white px-1">[user's UID from Auth]</code><br>
+              Field: <code class="bg-white px-1">role</code> = <code class="bg-white px-1">"admin"</code> or <code class="bg-white px-1">"cashier"</code>
+            </div>
+          </li>
+          <li><strong>Login</strong> with the email and password you created</li>
+        </ol>
+        <div class="mt-3 p-2 bg-yellow-50 border border-yellow-200 rounded">
+          <p class="text-xs text-yellow-800">
+            <i class="fas fa-info-circle mr-1"></i>
+            <strong>Admin</strong> has full access (products, all reports, exports). 
+            <strong>Cashier</strong> can only sell and view today's report.
+          </p>
+        </div>
+        <a href="README.md" target="_blank" class="block mt-3 text-center text-xs text-indigo-600 hover:underline">
+          View detailed setup guide →
+        </a>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -27,10 +68,21 @@
         <h1 class="text-4xl font-bold" id="shopName">My Shop</h1>
         <p class="text-xl" id="shopAddress">Loading...</p>
       </div>
-      <div class="flex gap-4">
-        <a href="products.html" class="bg-white text-indigo-700 px-6 py-3 rounded-xl font-bold">Products</a>
-        <a href="report.html" class="bg-white text-indigo-700 px-6 py-3 rounded-xl font-bold">Report</a>
-        <button onclick="logout()" class="bg-red-600 hover:bg-red-700 px-6 py-3 rounded-xl font-bold">Logout</button>
+      <div class="flex gap-4 items-center">
+        <span id="onlineStatus" class="bg-green-500 text-white px-4 py-2 rounded-lg font-bold text-sm">✓ ONLINE</span>
+        <span id="userRole" class="bg-yellow-400 text-gray-900 px-4 py-2 rounded-xl font-bold text-sm"></span>
+        <button onclick="showHelp()" class="bg-blue-500 text-white px-4 py-3 rounded-xl font-bold hover:bg-blue-600 transition" title="Keyboard Shortcuts">
+          <i class="fas fa-keyboard"></i>
+        </button>
+        <a href="products.html" id="productsLink" class="bg-white text-indigo-700 px-6 py-3 rounded-xl font-bold hover:bg-gray-100 transition">
+          <i class="fas fa-box mr-2"></i>Products
+        </a>
+        <a href="report.html" class="bg-white text-indigo-700 px-6 py-3 rounded-xl font-bold hover:bg-gray-100 transition">
+          <i class="fas fa-chart-bar mr-2"></i>Reports
+        </a>
+        <button onclick="logout()" class="bg-red-600 hover:bg-red-700 px-6 py-3 rounded-xl font-bold transition">
+          <i class="fas fa-sign-out-alt mr-2"></i>Logout
+        </button>
       </div>
     </div>
   </header>
@@ -44,20 +96,94 @@
 
     <!-- Cart -->
     <div class="w-full lg:w-1/3 bg-white shadow-2xl p-8 flex flex-col">
-      <h2 class="text-4xl font-bold mb-4">Cart (<span id="cartCount">0</span>)</h2>
+      <div class="flex justify-between items-center mb-4">
+        <h2 class="text-4xl font-bold">Cart (<span id="cartCount">0</span>)</h2>
+        <button onclick="clearCart()" class="bg-red-500 text-white px-4 py-2 rounded-lg text-sm hover:bg-red-600" title="Clear all items from cart">
+          <i class="fas fa-trash-alt mr-1"></i>Clear Cart
+        </button>
+      </div>
       <div id="cartItems" class="flex-1 overflow-y-auto space-y-3 mb-6"></div>
 
-      <div class="border-t-4 border-indigo-600 pt-6 space-y-5 text-2xl">
-        <div class="flex justify-between font-bold text-3xl text-green-600">
-          <span>TOTAL</span><span id="total">₹0.00</span>
+      <div class="border-t-4 border-indigo-600 pt-4 space-y-3 text-2xl">
+        <!-- Subtotal -->
+        <div class="flex justify-between text-lg">
+          <span>Subtotal</span><span id="subtotal">LKR 0.00</span>
         </div>
-        <input type="number" id="cashTendered" placeholder="Cash Tendered" class="w-full p-5 border-4 rounded-xl text-3xl text-right"/>
-        <div class="text-4xl font-bold text-green-600">Change: <span id="change">₹0.00</span></div>
-        <button onclick="completeSale()" class="w-full bg-green-600 hover:bg-green-700 text-white py-10 text-4xl font-bold rounded-2xl shadow-xl">
-          COMPLETE SALE
+        
+        <!-- Cart Discount Button -->
+        <button onclick="showCartDiscountModal()" class="w-full bg-yellow-500 text-white py-2 rounded-lg text-sm hover:bg-yellow-600 font-bold">
+          <i class="fas fa-percent mr-2"></i>Add Cart Discount (F3)
+        </button>
+        <div class="text-xs text-gray-500 text-center -mt-2" id="discountInfo">No discount applied</div>
+        
+        <!-- Hidden discount inputs (for backend use) -->
+        <input type="hidden" id="discountAmount" value="0"/>
+        <input type="hidden" id="discountType" value="fixed"/>
+        
+        <!-- Total -->
+        <div class="flex justify-between font-bold text-3xl text-green-600">
+          <span>TOTAL</span><span id="total">LKR 0.00</span>
+        </div>
+        <input type="number" id="cashTendered" placeholder="Cash Tendered (F2)" class="w-full p-4 border-4 rounded-xl text-2xl text-right" step="0.01"/>
+        <div class="text-3xl font-bold text-green-600">Change: <span id="change">LKR 0.00</span></div>
+        <button onclick="completeSale()" class="w-full bg-green-600 hover:bg-green-700 text-white py-8 text-3xl font-bold rounded-2xl shadow-xl transition-all hover:scale-105">
+          <i class="fas fa-check-circle mr-2"></i>COMPLETE SALE
+          <div class="text-xs font-normal mt-1 opacity-75">(Press F9 or Ctrl+Enter)</div>
         </button>
       </div>
     </div>
+  </div>
+</div>
+
+<!-- Help Modal -->
+<div id="helpModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onclick="closeHelp()">
+  <div class="bg-white p-8 rounded-3xl shadow-2xl max-w-2xl w-full mx-4" onclick="event.stopPropagation()">
+    <div class="flex justify-between items-center mb-6">
+      <h2 class="text-3xl font-bold text-indigo-700">
+        <i class="fas fa-keyboard mr-3"></i>Keyboard Shortcuts
+      </h2>
+      <button onclick="closeHelp()" class="text-gray-500 hover:text-gray-700 text-3xl">×</button>
+    </div>
+    <div class="space-y-4 text-lg">
+      <div class="flex justify-between border-b pb-2">
+        <span class="font-semibold">Search Products</span>
+        <kbd class="bg-gray-200 px-3 py-1 rounded">Ctrl + K</kbd>
+      </div>
+      <div class="flex justify-between border-b pb-2">
+        <span class="font-semibold">Add Product (Enter after search)</span>
+        <kbd class="bg-gray-200 px-3 py-1 rounded">Enter</kbd>
+      </div>
+      <div class="flex justify-between border-b pb-2">
+        <span class="font-semibold">Clear Search</span>
+        <kbd class="bg-gray-200 px-3 py-1 rounded">Escape</kbd>
+      </div>
+      <div class="flex justify-between border-b pb-2">
+        <span class="font-semibold">Focus Cash Input</span>
+        <kbd class="bg-gray-200 px-3 py-1 rounded">F2</kbd>
+      </div>
+      <div class="flex justify-between border-b pb-2">
+        <span class="font-semibold">Cart Discount Modal</span>
+        <kbd class="bg-gray-200 px-3 py-1 rounded">F3</kbd>
+      </div>
+      <div class="flex justify-between border-b pb-2">
+        <span class="font-semibold">Focus Quantity (in cart)</span>
+        <kbd class="bg-gray-200 px-3 py-1 rounded">F4</kbd>
+      </div>
+      <div class="flex justify-between border-b pb-2">
+        <span class="font-semibold">Complete Sale</span>
+        <kbd class="bg-gray-200 px-3 py-1 rounded mr-2">F9</kbd>
+        <kbd class="bg-gray-200 px-3 py-1 rounded">Ctrl + Enter</kbd>
+      </div>
+      <div class="mt-6 p-4 bg-blue-50 rounded-xl">
+        <p class="text-sm text-blue-800">
+          <i class="fas fa-info-circle mr-2"></i>
+          <strong>Barcode Scanner:</strong> Simply scan a barcode in the search field. Most scanners automatically press Enter after scanning.
+        </p>
+      </div>
+    </div>
+    <button onclick="closeHelp()" class="mt-6 w-full bg-indigo-600 text-white py-3 rounded-xl font-bold hover:bg-indigo-700">
+      Got it!
+    </button>
   </div>
 </div>
 

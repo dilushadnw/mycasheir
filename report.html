@@ -1,22 +1,703 @@
-<!DOCTYPE html><html><head><title>Report</title><script src="https://cdn.tailwindcss.com"></script></head>
-<body class="bg-gray-100 p-10">
-<h1 class="text-4xl font-bold mb-8">Today's Sales Report</h1>
-<div id="report" class="bg-white p-8 rounded-xl shadow"></div>
-<script type="module">
-import { db } from "./firebase-config.js";
-import { collection, query, where, onSnapshot } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore.js";
+<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Sales Reports</title><script src="https://cdn.tailwindcss.com"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet"><script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" integrity="sha512-qZvrmS2ekKPF2mSznTQsxqPgnpkI4DNTlrdUmTzrDgektczlKNRRhy5X5AAOnx5S09ydFYWWNSfcEqDTTHgtNA==" crossorigin="anonymous" referrerpolicy="no-referrer"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" integrity="sha512-r22gChDnGvBylk90+2e/ycr+equG0MQe8eGNrqGjIjBSMx8q4x8yzDlMOVWpvNfkAJIY5lwbE9/bm0JE7QKJOA==" crossorigin="anonymous" referrerpolicy="no-referrer"></script></head>
+<body class="bg-gray-100 p-6 md:p-10">
+<div class="max-w-7xl mx-auto">
+  <div class="flex justify-between items-center mb-8">
+    <h1 class="text-3xl md:text-4xl font-bold text-indigo-700">Sales Reports</h1>
+    <a href="index.html" class="bg-indigo-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-indigo-700"><i class="fas fa-arrow-left mr-2"></i>Back to POS</a>
+  </div>
 
-const today = new Date().toISOString().slice(0,10);
-onSnapshot(query(collection(db, "sales"), where("timestamp", ">=", today)), snap => {
-  let total = 0;
-  const div = document.getElementById("report");
-  div.innerHTML = "<h2 class='text-2xl font-bold mb-4'>Sales Today</h2>";
-  snap.forEach(s => {
-    const data = s.data();
-    total += data.total;
-    div.innerHTML += `<div class="border-b py-3">₹${data.total.toFixed(2)} - ${new Date(data.timestamp?.toDate()).toLocaleString()}</div>`;
-  });
-  div.innerHTML += `<div class="text-3xl font-bold text-green-600 mt-6">TOTAL TODAY: ₹${total.toFixed(2)}</div>`;
+  <!-- Date Filter -->
+  <div class="bg-white p-6 rounded-2xl shadow-xl mb-6">
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+      <div>
+        <label class="block text-sm font-bold mb-2">Report Type</label>
+        <select id="reportType" class="w-full p-3 border-2 rounded-xl text-lg">
+          <option value="today">Today</option>
+          <option value="yesterday">Yesterday</option>
+          <option value="week">This Week</option>
+          <option value="month">This Month</option>
+          <option value="custom">Custom Range</option>
+        </select>
+      </div>
+      <div id="customDateDiv" class="hidden">
+        <label class="block text-sm font-bold mb-2">Start Date</label>
+        <input type="date" id="startDate" class="w-full p-3 border-2 rounded-xl text-lg"/>
+      </div>
+      <div id="customDateDiv2" class="hidden">
+        <label class="block text-sm font-bold mb-2">End Date</label>
+        <input type="date" id="endDate" class="w-full p-3 border-2 rounded-xl text-lg"/>
+      </div>
+      <button onclick="loadReport()" class="bg-indigo-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-indigo-700">
+        <i class="fas fa-search mr-2"></i>Generate Report
+      </button>
+    </div>
+  </div>
+  
+  <!-- Report Tabs -->
+  <div class="bg-white p-4 rounded-2xl shadow-xl mb-6">
+    <div class="flex gap-2 flex-wrap">
+      <button onclick="showReportTab('sales')" id="tabSales" class="tab-btn px-6 py-3 rounded-xl font-bold bg-indigo-600 text-white">
+        <i class="fas fa-receipt mr-2"></i>Sales Report
+      </button>
+      <button onclick="showReportTab('income')" id="tabIncome" class="tab-btn px-6 py-3 rounded-xl font-bold bg-gray-200 text-gray-700 hover:bg-gray-300">
+        <i class="fas fa-chart-line mr-2"></i>Income Statement
+      </button>
+      <button onclick="showReportTab('products')" id="tabProducts" class="tab-btn px-6 py-3 rounded-xl font-bold bg-gray-200 text-gray-700 hover:bg-gray-300">
+        <i class="fas fa-box mr-2"></i>Product-wise Income
+      </button>
+      <button onclick="showReportTab('stock')" id="tabStock" class="tab-btn px-6 py-3 rounded-xl font-bold bg-gray-200 text-gray-700 hover:bg-gray-300">
+        <i class="fas fa-warehouse mr-2"></i>Stock Report
+      </button>
+    </div>
+  </div>
+
+  <!-- Summary Cards -->
+  <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+    <div class="bg-gradient-to-br from-green-500 to-green-600 text-white p-6 rounded-2xl shadow-xl">
+      <div class="text-lg opacity-90">Total Sales</div>
+      <div class="text-4xl font-bold" id="totalSales">LKR 0.00</div>
+    </div>
+    <div class="bg-gradient-to-br from-blue-500 to-blue-600 text-white p-6 rounded-2xl shadow-xl">
+      <div class="text-lg opacity-90">Transactions</div>
+      <div class="text-4xl font-bold" id="totalTransactions">0</div>
+    </div>
+    <div class="bg-gradient-to-br from-purple-500 to-purple-600 text-white p-6 rounded-2xl shadow-xl">
+      <div class="text-lg opacity-90">Avg. Sale</div>
+      <div class="text-4xl font-bold" id="avgSale">LKR 0.00</div>
+    </div>
+    <div class="bg-gradient-to-br from-orange-500 to-orange-600 text-white p-6 rounded-2xl shadow-xl">
+      <div class="text-lg opacity-90">Items Sold</div>
+      <div class="text-4xl font-bold" id="itemsSold">0</div>
+    </div>
+  </div>
+
+  <!-- Export Buttons -->
+  <div class="flex gap-4 mb-6">
+    <button onclick="exportPDF()" class="bg-red-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-red-700">
+      <i class="fas fa-file-pdf mr-2"></i>Export PDF
+    </button>
+    <button onclick="exportExcel()" class="bg-green-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-green-700">
+      <i class="fas fa-file-excel mr-2"></i>Export Excel
+    </button>
+  </div>
+
+  <!-- Sales List -->
+  <div id="salesTab" class="report-section">
+    <div class="bg-white p-6 rounded-2xl shadow-xl mb-6">
+      <h2 class="text-2xl font-bold mb-4">Transaction History</h2>
+      <div id="salesList" class="space-y-3"></div>
+    </div>
+
+    <!-- Most Sold Items -->
+    <div class="bg-white p-6 rounded-2xl shadow-xl">
+      <h2 class="text-2xl font-bold mb-4">Most Sold Items</h2>
+      <div id="topItems" class="space-y-3"></div>
+    </div>
+  </div>
+  
+  <!-- Income Statement Tab -->
+  <div id="incomeTab" class="report-section hidden">
+    <div class="bg-white p-6 rounded-2xl shadow-xl">
+      <h2 class="text-2xl font-bold mb-4">Income Statement</h2>
+      <div class="space-y-4">
+        <div class="grid grid-cols-2 gap-4 p-4 bg-gray-50 rounded-xl">
+          <div>
+            <div class="text-sm text-gray-600">Total Revenue</div>
+            <div class="text-2xl font-bold text-green-600" id="incomeRevenue">LKR 0.00</div>
+          </div>
+          <div>
+            <div class="text-sm text-gray-600">Total Cost of Goods</div>
+            <div class="text-2xl font-bold text-red-600" id="incomeCost">LKR 0.00</div>
+          </div>
+        </div>
+        <div class="p-6 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-xl">
+          <div class="text-lg opacity-90">Gross Profit</div>
+          <div class="text-4xl font-bold" id="incomeProfit">LKR 0.00</div>
+          <div class="text-sm opacity-75 mt-2">Profit Margin: <span id="profitMargin">0%</span></div>
+        </div>
+        <div id="incomeDetails" class="space-y-2"></div>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Product-wise Income Tab -->
+  <div id="productsTab" class="report-section hidden">
+    <div class="bg-white p-6 rounded-2xl shadow-xl">
+      <h2 class="text-2xl font-bold mb-4">Product-wise Income Report</h2>
+      <div id="productIncomeList" class="space-y-3"></div>
+    </div>
+  </div>
+  
+  <!-- Stock Report Tab -->
+  <div id="stockTab" class="report-section hidden">
+    <div class="bg-white p-6 rounded-2xl shadow-xl">
+      <h2 class="text-2xl font-bold mb-4">Current Stock Report</h2>
+      <div class="mb-4 flex gap-4">
+        <button onclick="filterStock('all')" class="px-4 py-2 rounded-lg bg-indigo-600 text-white font-bold" id="filterAll">All Items</button>
+        <button onclick="filterStock('low')" class="px-4 py-2 rounded-lg bg-gray-200 text-gray-700 font-bold" id="filterLow">Low Stock (≤5)</button>
+        <button onclick="filterStock('out')" class="px-4 py-2 rounded-lg bg-gray-200 text-gray-700 font-bold" id="filterOut">Out of Stock</button>
+      </div>
+      <div id="stockList" class="space-y-3"></div>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+import { db, auth } from "./firebase-config.js";
+import { formatLKR } from "./utils.js";
+import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-auth.js";
+import { collection, query, where, onSnapshot, Timestamp, orderBy, getDoc, doc, getDocs } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore.js";
+
+let currentSales = [];
+let userRole = "cashier";
+
+// Check authentication
+onAuthStateChanged(auth, async user => {
+  if (!user) {
+    alert("Please login first!");
+    window.location.href = "index.html";
+    return;
+  }
+  
+  // Get user role
+  const userDoc = await getDoc(doc(db, "users", user.uid));
+  if (userDoc.exists()) {
+    userRole = userDoc.data().role || "cashier";
+  }
+  
+  // For cashiers, restrict to today only
+  if (userRole === "cashier") {
+    document.getElementById("reportType").value = "today";
+    document.getElementById("reportType").disabled = true;
+    document.getElementById("reportType").style.opacity = "0.5";
+    document.getElementById("reportType").title = "Cashiers can only view today's report";
+  }
+  
+  loadReport();
 });
+
+// Tab switching
+window.showReportTab = (tab) => {
+  // Hide all tabs
+  document.querySelectorAll('.report-section').forEach(section => {
+    section.classList.add('hidden');
+  });
+  
+  // Remove active state from all buttons
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.classList.remove('bg-indigo-600', 'text-white');
+    btn.classList.add('bg-gray-200', 'text-gray-700');
+  });
+  
+  // Show selected tab
+  document.getElementById(`${tab}Tab`).classList.remove('hidden');
+  document.getElementById(`tab${tab.charAt(0).toUpperCase() + tab.slice(1)}`).classList.remove('bg-gray-200', 'text-gray-700');
+  document.getElementById(`tab${tab.charAt(0).toUpperCase() + tab.slice(1)}`).classList.add('bg-indigo-600', 'text-white');
+  
+  // Load appropriate data
+  if (tab === 'income') {
+    generateIncomeStatement();
+  } else if (tab === 'products') {
+    generateProductIncomeReport();
+  } else if (tab === 'stock') {
+    generateStockReport();
+  }
+};
+
+document.getElementById("reportType").addEventListener("change", (e) => {
+  const isCustom = e.target.value === "custom";
+  document.getElementById("customDateDiv").classList.toggle("hidden", !isCustom);
+  document.getElementById("customDateDiv2").classList.toggle("hidden", !isCustom);
+  if (!isCustom) loadReport();
+});
+
+function getDateRange(type) {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  
+  switch(type) {
+    case "today":
+      return { start: today, end: new Date() };
+    case "yesterday":
+      const yesterday = new Date(today);
+      yesterday.setDate(yesterday.getDate() - 1);
+      return { start: yesterday, end: today };
+    case "week":
+      const weekStart = new Date(today);
+      weekStart.setDate(weekStart.getDate() - 7);
+      return { start: weekStart, end: new Date() };
+    case "month":
+      const monthStart = new Date(today);
+      monthStart.setDate(monthStart.getDate() - 30);
+      return { start: monthStart, end: new Date() };
+    case "custom":
+      const startDate = document.getElementById("startDate").value;
+      const endDate = document.getElementById("endDate").value;
+      if (!startDate || !endDate) {
+        alert("Please select both start and end dates");
+        return null;
+      }
+      return { 
+        start: new Date(startDate + "T00:00:00"), 
+        end: new Date(endDate + "T23:59:59") 
+      };
+    default:
+      return { start: today, end: new Date() };
+  }
+}
+
+window.loadReport = () => {
+  const reportType = document.getElementById("reportType").value;
+  const dateRange = getDateRange(reportType);
+  
+  if (!dateRange) return;
+
+  const startTimestamp = Timestamp.fromDate(dateRange.start);
+  const endTimestamp = Timestamp.fromDate(dateRange.end);
+
+  const q = query(
+    collection(db, "sales"), 
+    where("timestamp", ">=", startTimestamp),
+    where("timestamp", "<=", endTimestamp),
+    orderBy("timestamp", "desc")
+  );
+
+  onSnapshot(q, snap => {
+    currentSales = [];
+    let totalRevenue = 0;
+    let totalItemsCount = 0;
+    const itemsSold = {};
+
+    snap.forEach(doc => {
+      const sale = doc.data();
+      sale.id = doc.id;
+      currentSales.push(sale);
+      totalRevenue += sale.total;
+      
+      sale.items.forEach(item => {
+        totalItemsCount += item.qty;
+        itemsSold[item.name] = (itemsSold[item.name] || 0) + item.qty;
+      });
+    });
+
+    // Update summary cards
+    document.getElementById("totalSales").textContent = formatLKR(totalRevenue);
+    document.getElementById("totalTransactions").textContent = currentSales.length;
+    document.getElementById("avgSale").textContent = currentSales.length > 0 
+      ? formatLKR(totalRevenue / currentSales.length)
+      : formatLKR(0);
+    document.getElementById("itemsSold").textContent = totalItemsCount;
+
+    // Display sales list
+    const salesList = document.getElementById("salesList");
+    salesList.innerHTML = "";
+    
+    if (currentSales.length === 0) {
+      salesList.innerHTML = "<p class='text-gray-500 text-center py-8'>No sales found for this period</p>";
+    } else {
+      currentSales.forEach(sale => {
+        const div = document.createElement("div");
+        div.className = "border-l-4 border-indigo-600 bg-gray-50 p-4 rounded-lg";
+        const txnDisplay = sale.transactionId || `DocID: ${sale.id.slice(0,8).toUpperCase()}`;
+        div.innerHTML = `
+          <div class="flex justify-between items-start">
+            <div>
+              <div class="font-bold text-lg">${txnDisplay}</div>
+              <div class="text-sm text-gray-600">${sale.timestamp ? new Date(sale.timestamp.toDate()).toLocaleString('en-LK') : 'N/A'}</div>
+              ${sale.userName ? `<div class="text-xs text-blue-600">By: ${sale.userName}</div>` : ''}
+              <div class="mt-2">
+                ${sale.items.map(item => `<div class="text-sm">${item.name} × ${item.qty} = ${formatLKR(item.price * item.qty)}</div>`).join('')}
+              </div>
+            </div>
+            <div class="text-right">
+              <div class="text-2xl font-bold text-green-600">${formatLKR(sale.total)}</div>
+              <div class="text-sm text-gray-600">Paid: ${formatLKR(sale.tendered)}</div>
+              <div class="text-sm text-gray-600">Change: ${formatLKR(sale.change)}</div>
+            </div>
+          </div>
+        `;
+        salesList.appendChild(div);
+      });
+    }
+
+    // Display top sold items
+    const topItems = document.getElementById("topItems");
+    topItems.innerHTML = "";
+    
+    const sortedItems = Object.entries(itemsSold).sort((a, b) => b[1] - a[1]).slice(0, 10);
+    
+    if (sortedItems.length === 0) {
+      topItems.innerHTML = "<p class='text-gray-500 text-center py-8'>No items sold in this period</p>";
+    } else {
+      sortedItems.forEach(([name, qty], index) => {
+        const div = document.createElement("div");
+        div.className = "flex justify-between items-center p-3 bg-gray-50 rounded-lg";
+        div.innerHTML = `
+          <div class="flex items-center gap-3">
+            <div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold">${index + 1}</div>
+            <div class="font-bold">${name}</div>
+          </div>
+          <div class="text-xl font-bold text-indigo-600">${qty} units</div>
+        `;
+        topItems.appendChild(div);
+      });
+    }
+  });
+};
+
+// Generate Income Statement
+window.generateIncomeStatement = async () => {
+  if (currentSales.length === 0) {
+    document.getElementById('incomeRevenue').textContent = 'LKR 0.00';
+    document.getElementById('incomeCost').textContent = 'LKR 0.00';
+    document.getElementById('incomeProfit').textContent = 'LKR 0.00';
+    document.getElementById('profitMargin').textContent = '0%';
+    document.getElementById('incomeDetails').innerHTML = '<p class="text-gray-500">No sales data available for this period.</p>';
+    return;
+  }
+  
+  let totalRevenue = 0;
+  let totalCost = 0;
+  const details = [];
+  
+  // Get products for cost calculation
+  const productsSnap = await getDocs(collection(db, "products"));
+  const productsMap = {};
+  productsSnap.forEach(doc => {
+    const prod = doc.data();
+    productsMap[doc.id] = prod;
+  });
+  
+  currentSales.forEach(sale => {
+    totalRevenue += sale.total || 0;
+    
+    sale.items.forEach(item => {
+      const product = productsMap[item.productId] || {};
+      const buyingPrice = product.buyingPrice || (product.sellingPrice ? product.sellingPrice * 0.7 : item.price * 0.7);
+      const itemCost = buyingPrice * item.qty;
+      totalCost += itemCost;
+    });
+  });
+  
+  const grossProfit = totalRevenue - totalCost;
+  const profitMargin = totalRevenue > 0 ? ((grossProfit / totalRevenue) * 100).toFixed(2) : 0;
+  
+  document.getElementById('incomeRevenue').textContent = formatLKR(totalRevenue);
+  document.getElementById('incomeCost').textContent = formatLKR(totalCost);
+  document.getElementById('incomeProfit').textContent = formatLKR(grossProfit);
+  document.getElementById('profitMargin').textContent = profitMargin + '%';
+  
+  // Details breakdown
+  const detailsHtml = `
+    <div class="border-t pt-3">
+      <div class="grid grid-cols-3 gap-4 text-sm">
+        <div>
+          <div class="font-bold">Total Revenue</div>
+          <div class="text-gray-600">${formatLKR(totalRevenue)}</div>
+        </div>
+        <div>
+          <div class="font-bold">Cost of Goods Sold</div>
+          <div class="text-gray-600">- ${formatLKR(totalCost)}</div>
+        </div>
+        <div>
+          <div class="font-bold">Gross Profit</div>
+          <div class="text-green-600 font-bold">${formatLKR(grossProfit)}</div>
+        </div>
+      </div>
+      <div class="mt-4 text-xs text-gray-500">
+        <i class="fas fa-info-circle"></i> Profit calculation based on buying vs selling prices from product data
+      </div>
+    </div>
+  `;
+  document.getElementById('incomeDetails').innerHTML = detailsHtml;
+};
+
+// Generate Product-wise Income Report
+window.generateProductIncomeReport = async () => {
+  if (currentSales.length === 0) {
+    document.getElementById('productIncomeList').innerHTML = '<p class="text-gray-500">No sales data available for this period.</p>';
+    return;
+  }
+  
+  const productData = {};
+  
+  // Get products for cost/price info
+  const productsSnap = await getDocs(collection(db, "products"));
+  const productsMap = {};
+  productsSnap.forEach(doc => {
+    const prod = doc.data();
+    productsMap[doc.id] = prod;
+  });
+  
+  currentSales.forEach(sale => {
+    sale.items.forEach(item => {
+      const product = productsMap[item.productId] || {};
+      const buyingPrice = product.buyingPrice || (item.price * 0.7);
+      const sellingPrice = item.price;
+      
+      if (!productData[item.name]) {
+        productData[item.name] = {
+          name: item.name,
+          qtySold: 0,
+          revenue: 0,
+          cost: 0,
+          profit: 0
+        };
+      }
+      
+      productData[item.name].qtySold += item.qty;
+      productData[item.name].revenue += sellingPrice * item.qty;
+      productData[item.name].cost += buyingPrice * item.qty;
+      productData[item.name].profit += (sellingPrice - buyingPrice) * item.qty;
+    });
+  });
+  
+  // Convert to array and sort by profit
+  const productArray = Object.values(productData).sort((a, b) => b.profit - a.profit);
+  
+  let html = '<div class="space-y-2">';
+  html += `
+    <div class="grid grid-cols-5 gap-2 p-3 bg-gray-100 rounded-lg font-bold text-sm">
+      <div>Product</div>
+      <div class="text-right">Qty Sold</div>
+      <div class="text-right">Revenue</div>
+      <div class="text-right">Cost</div>
+      <div class="text-right">Profit</div>
+    </div>
+  `;
+  
+  productArray.forEach(prod => {
+    const profitClass = prod.profit >= 0 ? 'text-green-600' : 'text-red-600';
+    html += `
+      <div class="grid grid-cols-5 gap-2 p-3 border rounded-lg hover:bg-gray-50">
+        <div class="font-semibold">${prod.name}</div>
+        <div class="text-right">${prod.qtySold}</div>
+        <div class="text-right">${formatLKR(prod.revenue)}</div>
+        <div class="text-right">${formatLKR(prod.cost)}</div>
+        <div class="text-right font-bold ${profitClass}">${formatLKR(prod.profit)}</div>
+      </div>
+    `;
+  });
+  
+  html += '</div>';
+  document.getElementById('productIncomeList').innerHTML = html;
+};
+
+// Generate Stock Report
+window.generateStockReport = async (filter = 'all') => {
+  const productsSnap = await getDocs(collection(db, "products"));
+  const products = [];
+  
+  productsSnap.forEach(doc => {
+    const prod = doc.data();
+    prod.id = doc.id;
+    products.push(prod);
+  });
+  
+  // Filter based on selection
+  let filteredProducts = products;
+  if (filter === 'low') {
+    filteredProducts = products.filter(p => p.stock > 0 && p.stock <= 5);
+  } else if (filter === 'out') {
+    filteredProducts = products.filter(p => p.stock === 0);
+  }
+  
+  // Sort by stock level (lowest first)
+  filteredProducts.sort((a, b) => a.stock - b.stock);
+  
+  let html = '<div class="space-y-2">';
+  html += `
+    <div class="grid grid-cols-6 gap-2 p-3 bg-gray-100 rounded-lg font-bold text-sm">
+      <div>Product</div>
+      <div>Category</div>
+      <div class="text-right">Stock</div>
+      <div class="text-right">Buy Price</div>
+      <div class="text-right">Sell Price</div>
+      <div class="text-right">Value</div>
+    </div>
+  `;
+  
+  if (filteredProducts.length === 0) {
+    html += '<p class="text-gray-500 p-4">No products match the filter criteria.</p>';
+  } else {
+    filteredProducts.forEach(prod => {
+      const stockClass = prod.stock === 0 ? 'text-red-600' : prod.stock <= 5 ? 'text-orange-600' : 'text-green-600';
+      const stockValue = (prod.buyingPrice || prod.price || 0) * prod.stock;
+      
+      html += `
+        <div class="grid grid-cols-6 gap-2 p-3 border rounded-lg hover:bg-gray-50">
+          <div class="font-semibold">${prod.name}</div>
+          <div class="text-sm text-gray-600">${prod.category || '-'}</div>
+          <div class="text-right font-bold ${stockClass}">${prod.stock}${prod.unit ? prod.unit : ''}</div>
+          <div class="text-right text-sm">${formatLKR(prod.buyingPrice || prod.price || 0)}</div>
+          <div class="text-right text-sm">${formatLKR(prod.sellingPrice || prod.price || 0)}</div>
+          <div class="text-right font-semibold">${formatLKR(stockValue)}</div>
+        </div>
+      `;
+    });
+  }
+  
+  html += '</div>';
+  document.getElementById('stockList').innerHTML = html;
+};
+
+window.filterStock = (filter) => {
+  // Update button states
+  document.querySelectorAll('[onclick^="filterStock"]').forEach(btn => {
+    btn.classList.remove('bg-indigo-600', 'text-white');
+    btn.classList.add('bg-gray-200', 'text-gray-700');
+  });
+  
+  const btnId = filter === 'all' ? 'filterAll' : filter === 'low' ? 'filterLow' : 'filterOut';
+  document.getElementById(btnId).classList.remove('bg-gray-200', 'text-gray-700');
+  document.getElementById(btnId).classList.add('bg-indigo-600', 'text-white');
+  
+  generateStockReport(filter);
+};
+
+window.exportPDF = () => {
+  try {
+    const { jsPDF } = window.jspdf;
+    if (!jsPDF) {
+      alert("PDF library not loaded. Please refresh the page.");
+      return;
+    }
+    
+    const doc = new jsPDF('p', 'mm', 'a4'); // Explicit format
+    
+    // Header
+    doc.setFontSize(20);
+    doc.setFont('helvetica', 'bold');
+    doc.text("Sales Report", 105, 20, { align: "center" });
+    
+    // Report Info
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'normal');
+    const reportType = document.getElementById("reportType").value;
+    doc.text(`Report Type: ${reportType.toUpperCase()}`, 20, 35);
+    doc.text(`Generated: ${new Date().toLocaleString('en-LK')}`, 20, 42);
+    
+    // Summary Section
+    let y = 55;
+    doc.setFontSize(14);
+    doc.setFont('helvetica', 'bold');
+    doc.text("Summary:", 20, y);
+    y += 8;
+    
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Total Sales: ${document.getElementById("totalSales").textContent}`, 25, y);
+    y += 6;
+    doc.text(`Total Transactions: ${document.getElementById("totalTransactions").textContent}`, 25, y);
+    y += 6;
+    doc.text(`Average Sale: ${document.getElementById("avgSale").textContent}`, 25, y);
+    y += 6;
+    doc.text(`Items Sold: ${document.getElementById("itemsSold").textContent}`, 25, y);
+    y += 12;
+    
+    // Transactions Section
+    doc.setFontSize(14);
+    doc.setFont('helvetica', 'bold');
+    doc.text("Transactions:", 20, y);
+    y += 8;
+    
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    
+    if (currentSales.length === 0) {
+      doc.text("No transactions found for this period.", 25, y);
+    } else {
+      currentSales.forEach((sale, index) => {
+        if (y > 270) {
+          doc.addPage();
+          y = 20;
+        }
+        
+        const txnId = sale.transactionId || `ID:${sale.id.slice(0,8)}`;
+        const dateStr = sale.timestamp ? new Date(sale.timestamp.toDate()).toLocaleString('en-LK') : 'N/A';
+        const totalStr = formatLKR(sale.total);
+        const userName = sale.userName || sale.userEmail || 'Unknown';
+        
+        doc.text(`${txnId}`, 25, y);
+        doc.text(`${dateStr}`, 70, y);
+        doc.text(`${totalStr}`, 140, y);
+        doc.text(`By: ${userName}`, 170, y);
+        
+        y += 5;
+        
+        // Add items if space available
+        if (y < 265) {
+          sale.items.forEach(item => {
+            if (y > 270) return;
+            doc.setFontSize(8);
+            doc.text(`  - ${item.name} x${item.qty}`, 30, y);
+            y += 4;
+          });
+          doc.setFontSize(9);
+          y += 2;
+        }
+      });
+    }
+    
+    // Footer
+    const pageCount = doc.internal.getNumberOfPages();
+    for (let i = 1; i <= pageCount; i++) {
+      doc.setPage(i);
+      doc.setFontSize(8);
+      doc.text(`Page ${i} of ${pageCount}`, 105, 290, { align: "center" });
+    }
+    
+    const filename = `sales-report-${new Date().toISOString().split('T')[0]}.pdf`;
+    doc.save(filename);
+  } catch (error) {
+    console.error("PDF Export Error:", error);
+    alert("Error generating PDF: " + error.message);
+  }
+};
+
+window.exportExcel = () => {
+  try {
+    if (typeof XLSX === 'undefined') {
+      alert("Excel library not loaded. Please refresh the page.");
+      return;
+    }
+    
+    const data = currentSales.map(sale => ({
+      'Transaction ID': sale.transactionId || `DocID:${sale.id.slice(0,8)}`,
+      'Date': sale.timestamp ? new Date(sale.timestamp.toDate()).toLocaleString('en-LK') : 'N/A',
+      'User': sale.userName || sale.userEmail || 'Unknown',
+      'Total (LKR)': sale.total.toFixed(2),
+      'Tendered (LKR)': sale.tendered.toFixed(2),
+      'Change (LKR)': sale.change.toFixed(2),
+      'Items': sale.items.map(i => `${i.name}(${i.qty})`).join(', ')
+    }));
+    
+    const ws = XLSX.utils.json_to_sheet(data);
+    
+    // Auto-size columns
+    const cols = [
+      { wch: 20 }, // Transaction ID
+      { wch: 25 }, // Date
+      { wch: 20 }, // User
+      { wch: 15 }, // Total
+      { wch: 15 }, // Tendered
+      { wch: 15 }, // Change
+      { wch: 50 }  // Items
+    ];
+    ws['!cols'] = cols;
+    
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Sales");
+    
+    const filename = `sales-report-${new Date().toISOString().split('T')[0]}.xlsx`;
+    XLSX.writeFile(wb, filename);
+  } catch (error) {
+    console.error("Excel Export Error:", error);
+    alert("Error generating Excel file: " + error.message);
+  }
+};
+
+// Load today's report by default
+loadReport();
 </script>
 </body></html>

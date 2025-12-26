@@ -3,31 +3,67 @@ export function beep() {
   new Audio("data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=").play().catch(() => {});
 }
 
+// Format currency in LKR format
+export function formatLKR(amount) {
+  return new Intl.NumberFormat('en-LK', {
+    style: 'currency',
+    currency: 'LKR',
+    minimumFractionDigits: 2
+  }).format(amount);
+}
+
 export function printReceipt(data, settings) {
   const win = window.open('', '_blank');
   win.document.write(`
 <!DOCTYPE html>
 <html><head><title>Receipt</title>
+<meta charset="UTF-8">
 <style>
-  body { font-family: monospace; max-width: 80mm; margin: 0 auto; padding: 10px; font-size: 14px; text-align: center; }
-  .line { border-top: 2px dashed #000; margin: 10px 0; }
-  .big { font-size: 20px; font-weight: bold; }
+  body { 
+    font-family: 'Courier New', monospace; 
+    max-width: 80mm; 
+    margin: 0 auto; 
+    padding: 10px; 
+    font-size: 13px; 
+    text-align: center; 
+  }
+  .line { border-top: 2px dashed #000; margin: 8px 0; }
+  .big { font-size: 18px; font-weight: bold; margin: 10px 0; }
+  .header { font-size: 16px; font-weight: bold; margin-bottom: 5px; }
+  .items { text-align: left; margin: 10px 0; }
+  .item-row { display: flex; justify-content: space-between; margin: 5px 0; }
+  .small { font-size: 11px; color: #666; }
+  @media print {
+    body { margin: 0; padding: 5mm; }
+  }
 </style>
 </head>
 <body>
-  <h2>${settings.shopName}</h2>
-  <p>${settings.address || ''}<br>${new Date().toLocaleString()}</p>
+  <div class="header">${settings.shopName}</div>
+  <p>${settings.address || 'Your Address'}</p>
+  <p class="small">${new Date().toLocaleString('en-LK')}</p>
+  ${data.transactionId ? `<p class="small"><strong>TXN:</strong> ${data.transactionId}</p>` : ''}
+  ${data.userName ? `<p class="small">Served by: ${data.userName}</p>` : ''}
   <div class="line"></div>
-  ${data.items.map(i => 
-    `<div style="display:flex;justify-content:space-between">
-      <span>${i.name} × ${i.qty}</span>
-      <span>${settings.currency}${(i.price*i.qty).toFixed(2)}</span>
-    </div>`
-  ).join('')}
+  <div class="items">
+    ${data.items.map(i => 
+      `<div class="item-row">
+        <span>${i.name} × ${i.qty}</span>
+        <span>${formatLKR(i.price*i.qty)}</span>
+      </div>
+      <div class="small" style="margin-top: -3px; margin-bottom: 5px;">@ ${formatLKR(i.price)} each</div>`
+    ).join('')}
+  </div>
   <div class="line"></div>
-  <div class="big">TOTAL: ${settings.currency}${data.total.toFixed(2)}</div>
-  <div>Paid: ${data.tendered.toFixed(2)} • Change: ${settings.currency}${data.change.toFixed(2)}</div>
-  <br><p>*** Thank You ***</p>
+  ${data.subtotal ? `<div class="item-row"><span>Subtotal:</span><span>${formatLKR(data.subtotal)}</span></div>` : ''}
+  ${data.discount && data.discount > 0 ? `<div class="item-row" style="color: red;"><span>Discount ${data.discountType === 'percent' ? '(' + data.discountAmount + '%)' : ''}:</span><span>-${formatLKR(data.discount)}</span></div>` : ''}
+  <div class="big">TOTAL: ${formatLKR(data.total)}</div>
+  <div>Cash: ${formatLKR(data.tendered)}</div>
+  <div>Change: ${formatLKR(data.change)}</div>
+  <div class="line"></div>
+  <p style="margin-top: 15px;">*** THANK YOU ***</p>
+  <p class="small">Please Come Again!</p>
+  <p class="small" style="margin-top: 10px;">Powered by CashierPOS</p>
 </body></html>`);
   win.document.close();
   setTimeout(() => win.print(), 600);
