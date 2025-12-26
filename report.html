@@ -32,6 +32,24 @@
       </button>
     </div>
   </div>
+  
+  <!-- Report Tabs -->
+  <div class="bg-white p-4 rounded-2xl shadow-xl mb-6">
+    <div class="flex gap-2 flex-wrap">
+      <button onclick="showReportTab('sales')" id="tabSales" class="tab-btn px-6 py-3 rounded-xl font-bold bg-indigo-600 text-white">
+        <i class="fas fa-receipt mr-2"></i>Sales Report
+      </button>
+      <button onclick="showReportTab('income')" id="tabIncome" class="tab-btn px-6 py-3 rounded-xl font-bold bg-gray-200 text-gray-700 hover:bg-gray-300">
+        <i class="fas fa-chart-line mr-2"></i>Income Statement
+      </button>
+      <button onclick="showReportTab('products')" id="tabProducts" class="tab-btn px-6 py-3 rounded-xl font-bold bg-gray-200 text-gray-700 hover:bg-gray-300">
+        <i class="fas fa-box mr-2"></i>Product-wise Income
+      </button>
+      <button onclick="showReportTab('stock')" id="tabStock" class="tab-btn px-6 py-3 rounded-xl font-bold bg-gray-200 text-gray-700 hover:bg-gray-300">
+        <i class="fas fa-warehouse mr-2"></i>Stock Report
+      </button>
+    </div>
+  </div>
 
   <!-- Summary Cards -->
   <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
@@ -64,15 +82,63 @@
   </div>
 
   <!-- Sales List -->
-  <div class="bg-white p-6 rounded-2xl shadow-xl mb-6">
-    <h2 class="text-2xl font-bold mb-4">Transaction History</h2>
-    <div id="salesList" class="space-y-3"></div>
-  </div>
+  <div id="salesTab" class="report-section">
+    <div class="bg-white p-6 rounded-2xl shadow-xl mb-6">
+      <h2 class="text-2xl font-bold mb-4">Transaction History</h2>
+      <div id="salesList" class="space-y-3"></div>
+    </div>
 
-  <!-- Most Sold Items -->
-  <div class="bg-white p-6 rounded-2xl shadow-xl">
-    <h2 class="text-2xl font-bold mb-4">Most Sold Items</h2>
-    <div id="topItems" class="space-y-3"></div>
+    <!-- Most Sold Items -->
+    <div class="bg-white p-6 rounded-2xl shadow-xl">
+      <h2 class="text-2xl font-bold mb-4">Most Sold Items</h2>
+      <div id="topItems" class="space-y-3"></div>
+    </div>
+  </div>
+  
+  <!-- Income Statement Tab -->
+  <div id="incomeTab" class="report-section hidden">
+    <div class="bg-white p-6 rounded-2xl shadow-xl">
+      <h2 class="text-2xl font-bold mb-4">Income Statement</h2>
+      <div class="space-y-4">
+        <div class="grid grid-cols-2 gap-4 p-4 bg-gray-50 rounded-xl">
+          <div>
+            <div class="text-sm text-gray-600">Total Revenue</div>
+            <div class="text-2xl font-bold text-green-600" id="incomeRevenue">LKR 0.00</div>
+          </div>
+          <div>
+            <div class="text-sm text-gray-600">Total Cost of Goods</div>
+            <div class="text-2xl font-bold text-red-600" id="incomeCost">LKR 0.00</div>
+          </div>
+        </div>
+        <div class="p-6 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-xl">
+          <div class="text-lg opacity-90">Gross Profit</div>
+          <div class="text-4xl font-bold" id="incomeProfit">LKR 0.00</div>
+          <div class="text-sm opacity-75 mt-2">Profit Margin: <span id="profitMargin">0%</span></div>
+        </div>
+        <div id="incomeDetails" class="space-y-2"></div>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Product-wise Income Tab -->
+  <div id="productsTab" class="report-section hidden">
+    <div class="bg-white p-6 rounded-2xl shadow-xl">
+      <h2 class="text-2xl font-bold mb-4">Product-wise Income Report</h2>
+      <div id="productIncomeList" class="space-y-3"></div>
+    </div>
+  </div>
+  
+  <!-- Stock Report Tab -->
+  <div id="stockTab" class="report-section hidden">
+    <div class="bg-white p-6 rounded-2xl shadow-xl">
+      <h2 class="text-2xl font-bold mb-4">Current Stock Report</h2>
+      <div class="mb-4 flex gap-4">
+        <button onclick="filterStock('all')" class="px-4 py-2 rounded-lg bg-indigo-600 text-white font-bold" id="filterAll">All Items</button>
+        <button onclick="filterStock('low')" class="px-4 py-2 rounded-lg bg-gray-200 text-gray-700 font-bold" id="filterLow">Low Stock (≤5)</button>
+        <button onclick="filterStock('out')" class="px-4 py-2 rounded-lg bg-gray-200 text-gray-700 font-bold" id="filterOut">Out of Stock</button>
+      </div>
+      <div id="stockList" class="space-y-3"></div>
+    </div>
   </div>
 </div>
 
@@ -80,7 +146,7 @@
 import { db, auth } from "./firebase-config.js";
 import { formatLKR } from "./utils.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-auth.js";
-import { collection, query, where, onSnapshot, Timestamp, orderBy, getDoc, doc } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore.js";
+import { collection, query, where, onSnapshot, Timestamp, orderBy, getDoc, doc, getDocs } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore.js";
 
 let currentSales = [];
 let userRole = "cashier";
@@ -109,6 +175,34 @@ onAuthStateChanged(auth, async user => {
   
   loadReport();
 });
+
+// Tab switching
+window.showReportTab = (tab) => {
+  // Hide all tabs
+  document.querySelectorAll('.report-section').forEach(section => {
+    section.classList.add('hidden');
+  });
+  
+  // Remove active state from all buttons
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.classList.remove('bg-indigo-600', 'text-white');
+    btn.classList.add('bg-gray-200', 'text-gray-700');
+  });
+  
+  // Show selected tab
+  document.getElementById(`${tab}Tab`).classList.remove('hidden');
+  document.getElementById(`tab${tab.charAt(0).toUpperCase() + tab.slice(1)}`).classList.remove('bg-gray-200', 'text-gray-700');
+  document.getElementById(`tab${tab.charAt(0).toUpperCase() + tab.slice(1)}`).classList.add('bg-indigo-600', 'text-white');
+  
+  // Load appropriate data
+  if (tab === 'income') {
+    generateIncomeStatement();
+  } else if (tab === 'products') {
+    generateProductIncomeReport();
+  } else if (tab === 'stock') {
+    generateStockReport();
+  }
+};
 
 document.getElementById("reportType").addEventListener("change", (e) => {
   const isCustom = e.target.value === "custom";
@@ -249,6 +343,216 @@ window.loadReport = () => {
       });
     }
   });
+};
+
+// Generate Income Statement
+window.generateIncomeStatement = async () => {
+  if (currentSales.length === 0) {
+    document.getElementById('incomeRevenue').textContent = 'LKR 0.00';
+    document.getElementById('incomeCost').textContent = 'LKR 0.00';
+    document.getElementById('incomeProfit').textContent = 'LKR 0.00';
+    document.getElementById('profitMargin').textContent = '0%';
+    document.getElementById('incomeDetails').innerHTML = '<p class="text-gray-500">No sales data available for this period.</p>';
+    return;
+  }
+  
+  let totalRevenue = 0;
+  let totalCost = 0;
+  const details = [];
+  
+  // Get products for cost calculation
+  const productsSnap = await getDocs(collection(db, "products"));
+  const productsMap = {};
+  productsSnap.forEach(doc => {
+    const prod = doc.data();
+    productsMap[doc.id] = prod;
+  });
+  
+  currentSales.forEach(sale => {
+    totalRevenue += sale.total || 0;
+    
+    sale.items.forEach(item => {
+      const product = productsMap[item.productId] || {};
+      const buyingPrice = product.buyingPrice || (product.sellingPrice ? product.sellingPrice * 0.7 : item.price * 0.7);
+      const itemCost = buyingPrice * item.qty;
+      totalCost += itemCost;
+    });
+  });
+  
+  const grossProfit = totalRevenue - totalCost;
+  const profitMargin = totalRevenue > 0 ? ((grossProfit / totalRevenue) * 100).toFixed(2) : 0;
+  
+  document.getElementById('incomeRevenue').textContent = formatLKR(totalRevenue);
+  document.getElementById('incomeCost').textContent = formatLKR(totalCost);
+  document.getElementById('incomeProfit').textContent = formatLKR(grossProfit);
+  document.getElementById('profitMargin').textContent = profitMargin + '%';
+  
+  // Details breakdown
+  const detailsHtml = `
+    <div class="border-t pt-3">
+      <div class="grid grid-cols-3 gap-4 text-sm">
+        <div>
+          <div class="font-bold">Total Revenue</div>
+          <div class="text-gray-600">${formatLKR(totalRevenue)}</div>
+        </div>
+        <div>
+          <div class="font-bold">Cost of Goods Sold</div>
+          <div class="text-gray-600">- ${formatLKR(totalCost)}</div>
+        </div>
+        <div>
+          <div class="font-bold">Gross Profit</div>
+          <div class="text-green-600 font-bold">${formatLKR(grossProfit)}</div>
+        </div>
+      </div>
+      <div class="mt-4 text-xs text-gray-500">
+        <i class="fas fa-info-circle"></i> Profit calculation based on buying vs selling prices from product data
+      </div>
+    </div>
+  `;
+  document.getElementById('incomeDetails').innerHTML = detailsHtml;
+};
+
+// Generate Product-wise Income Report
+window.generateProductIncomeReport = async () => {
+  if (currentSales.length === 0) {
+    document.getElementById('productIncomeList').innerHTML = '<p class="text-gray-500">No sales data available for this period.</p>';
+    return;
+  }
+  
+  const productData = {};
+  
+  // Get products for cost/price info
+  const productsSnap = await getDocs(collection(db, "products"));
+  const productsMap = {};
+  productsSnap.forEach(doc => {
+    const prod = doc.data();
+    productsMap[doc.id] = prod;
+  });
+  
+  currentSales.forEach(sale => {
+    sale.items.forEach(item => {
+      const product = productsMap[item.productId] || {};
+      const buyingPrice = product.buyingPrice || (item.price * 0.7);
+      const sellingPrice = item.price;
+      
+      if (!productData[item.name]) {
+        productData[item.name] = {
+          name: item.name,
+          qtySold: 0,
+          revenue: 0,
+          cost: 0,
+          profit: 0
+        };
+      }
+      
+      productData[item.name].qtySold += item.qty;
+      productData[item.name].revenue += sellingPrice * item.qty;
+      productData[item.name].cost += buyingPrice * item.qty;
+      productData[item.name].profit += (sellingPrice - buyingPrice) * item.qty;
+    });
+  });
+  
+  // Convert to array and sort by profit
+  const productArray = Object.values(productData).sort((a, b) => b.profit - a.profit);
+  
+  let html = '<div class="space-y-2">';
+  html += `
+    <div class="grid grid-cols-5 gap-2 p-3 bg-gray-100 rounded-lg font-bold text-sm">
+      <div>Product</div>
+      <div class="text-right">Qty Sold</div>
+      <div class="text-right">Revenue</div>
+      <div class="text-right">Cost</div>
+      <div class="text-right">Profit</div>
+    </div>
+  `;
+  
+  productArray.forEach(prod => {
+    const profitClass = prod.profit >= 0 ? 'text-green-600' : 'text-red-600';
+    html += `
+      <div class="grid grid-cols-5 gap-2 p-3 border rounded-lg hover:bg-gray-50">
+        <div class="font-semibold">${prod.name}</div>
+        <div class="text-right">${prod.qtySold}</div>
+        <div class="text-right">${formatLKR(prod.revenue)}</div>
+        <div class="text-right">${formatLKR(prod.cost)}</div>
+        <div class="text-right font-bold ${profitClass}">${formatLKR(prod.profit)}</div>
+      </div>
+    `;
+  });
+  
+  html += '</div>';
+  document.getElementById('productIncomeList').innerHTML = html;
+};
+
+// Generate Stock Report
+window.generateStockReport = async (filter = 'all') => {
+  const productsSnap = await getDocs(collection(db, "products"));
+  const products = [];
+  
+  productsSnap.forEach(doc => {
+    const prod = doc.data();
+    prod.id = doc.id;
+    products.push(prod);
+  });
+  
+  // Filter based on selection
+  let filteredProducts = products;
+  if (filter === 'low') {
+    filteredProducts = products.filter(p => p.stock > 0 && p.stock <= 5);
+  } else if (filter === 'out') {
+    filteredProducts = products.filter(p => p.stock === 0);
+  }
+  
+  // Sort by stock level (lowest first)
+  filteredProducts.sort((a, b) => a.stock - b.stock);
+  
+  let html = '<div class="space-y-2">';
+  html += `
+    <div class="grid grid-cols-6 gap-2 p-3 bg-gray-100 rounded-lg font-bold text-sm">
+      <div>Product</div>
+      <div>Category</div>
+      <div class="text-right">Stock</div>
+      <div class="text-right">Buy Price</div>
+      <div class="text-right">Sell Price</div>
+      <div class="text-right">Value</div>
+    </div>
+  `;
+  
+  if (filteredProducts.length === 0) {
+    html += '<p class="text-gray-500 p-4">No products match the filter criteria.</p>';
+  } else {
+    filteredProducts.forEach(prod => {
+      const stockClass = prod.stock === 0 ? 'text-red-600' : prod.stock <= 5 ? 'text-orange-600' : 'text-green-600';
+      const stockValue = (prod.buyingPrice || prod.price || 0) * prod.stock;
+      
+      html += `
+        <div class="grid grid-cols-6 gap-2 p-3 border rounded-lg hover:bg-gray-50">
+          <div class="font-semibold">${prod.name}</div>
+          <div class="text-sm text-gray-600">${prod.category || '-'}</div>
+          <div class="text-right font-bold ${stockClass}">${prod.stock}${prod.unit ? prod.unit : ''}</div>
+          <div class="text-right text-sm">${formatLKR(prod.buyingPrice || prod.price || 0)}</div>
+          <div class="text-right text-sm">${formatLKR(prod.sellingPrice || prod.price || 0)}</div>
+          <div class="text-right font-semibold">${formatLKR(stockValue)}</div>
+        </div>
+      `;
+    });
+  }
+  
+  html += '</div>';
+  document.getElementById('stockList').innerHTML = html;
+};
+
+window.filterStock = (filter) => {
+  // Update button states
+  document.querySelectorAll('[onclick^="filterStock"]').forEach(btn => {
+    btn.classList.remove('bg-indigo-600', 'text-white');
+    btn.classList.add('bg-gray-200', 'text-gray-700');
+  });
+  
+  const btnId = filter === 'all' ? 'filterAll' : filter === 'low' ? 'filterLow' : 'filterOut';
+  document.getElementById(btnId).classList.remove('bg-gray-200', 'text-gray-700');
+  document.getElementById(btnId).classList.add('bg-indigo-600', 'text-white');
+  
+  generateStockReport(filter);
 };
 
 window.exportPDF = () => {

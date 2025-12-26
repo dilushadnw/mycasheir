@@ -300,20 +300,41 @@ window.updateStock = async (id, currentStock) => {
   }
 };
 
-window.editProduct = async (id, currentName, currentPrice, currentStock, currentBarcode) => {
-  const newName = prompt("Product Name:", currentName);
-  if (!newName) return;
-  
-  const newPrice = prompt("Price:", currentPrice);
-  if (!newPrice || isNaN(parseFloat(newPrice))) return;
-  
-  const newBarcode = prompt("Barcode (optional):", currentBarcode || "");
-  
+window.editProduct = async (id) => {
   try {
+    // Get current product data
+    const productDoc = await getDoc(doc(db, "products", id));
+    if (!productDoc.exists()) {
+      alert("Product not found!");
+      return;
+    }
+    
+    const currentData = productDoc.data();
+    
+    const newName = prompt("Product Name:", currentData.name);
+    if (!newName) return;
+    
+    const newBuyingPrice = prompt("Buying Price (LKR):", currentData.buyingPrice || currentData.price || "");
+    if (!newBuyingPrice || isNaN(parseFloat(newBuyingPrice))) return;
+    
+    const newSellingPrice = prompt("Selling Price (LKR):", currentData.sellingPrice || currentData.price || "");
+    if (!newSellingPrice || isNaN(parseFloat(newSellingPrice))) return;
+    
+    const newBarcode = prompt("Barcode (optional):", currentData.barcode || "");
+    const newCategory = prompt("Category (optional):", currentData.category || "");
+    
+    const buyingPrice = parseFloat(newBuyingPrice);
+    const sellingPrice = parseFloat(newSellingPrice);
+    const profitPerItem = sellingPrice - buyingPrice;
+    
     await updateDoc(doc(db, "products", id), { 
       name: newName, 
-      price: parseFloat(newPrice),
-      barcode: newBarcode || ""
+      buyingPrice: buyingPrice,
+      sellingPrice: sellingPrice,
+      price: sellingPrice, // Keep for backward compatibility
+      profitPerItem: profitPerItem,
+      barcode: newBarcode || "",
+      category: newCategory || ""
     });
     alert("Product updated successfully!");
   } catch (error) {
@@ -454,7 +475,7 @@ function renderProducts(products) {
     const editBtn = document.createElement("button");
     editBtn.className = "bg-yellow-600 text-white px-4 py-2 rounded-lg hover:bg-yellow-700 text-sm font-bold";
     editBtn.innerHTML = '<i class="fas fa-edit mr-1"></i>Edit';
-    editBtn.onclick = () => editProduct(p.id, p.name, p.price, p.stock, p.barcode || "");
+    editBtn.onclick = () => editProduct(p.id);
     buttonsDiv.appendChild(editBtn);
     
     card.appendChild(buttonsDiv);
