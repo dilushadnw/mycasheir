@@ -455,6 +455,14 @@ function updateCart() {
       updateCart();
     });
   });
+  
+  // Add item discount button listeners
+  document.querySelectorAll(".item-discount").forEach(btn => {
+    btn.addEventListener("click", function() {
+      const index = parseInt(this.getAttribute("data-index"));
+      showItemDiscountModal(index);
+    });
+  });
 
   // Calculate discount
   const discountAmount = parseFloat(document.getElementById("discountAmount")?.value) || 0;
@@ -494,6 +502,178 @@ setTimeout(() => {
   if (discountTypeSelect) discountTypeSelect.onchange = updateCart;
 }, 500);
 
+// Item discount modal
+function showItemDiscountModal(index) {
+  const item = cart[index];
+  if (!item) return;
+  
+  const modal = document.createElement('div');
+  modal.id = 'itemDiscountModal';
+  modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
+  
+  modal.innerHTML = `
+    <div class="bg-white p-8 rounded-3xl shadow-2xl max-w-md w-full mx-4">
+      <h2 class="text-2xl font-bold mb-6 text-indigo-700">Discount for ${item.name}</h2>
+      <div class="mb-4">
+        <label class="block text-sm font-bold mb-2">Item Total: ${formatLKR(item.price * item.qty)}</label>
+        <input type="number" id="itemDiscountAmount" placeholder="Discount Amount" class="w-full p-4 border-2 rounded-xl text-lg mb-3" step="0.01" min="0" value="${item.discount || 0}"/>
+        <select id="itemDiscountType" class="w-full p-4 border-2 rounded-xl text-lg mb-3">
+          <option value="fixed">Fixed Amount (LKR)</option>
+          <option value="percent">Percentage (%)</option>
+        </select>
+        <div id="itemDiscPreview" class="text-lg font-bold text-green-600 mb-4"></div>
+      </div>
+      <div class="flex gap-3">
+        <button onclick="applyItemDiscount(${index})" class="flex-1 bg-green-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-green-700">
+          <i class="fas fa-check mr-2"></i>Apply
+        </button>
+        <button onclick="closeItemDiscountModal()" class="flex-1 bg-gray-500 text-white px-6 py-3 rounded-xl font-bold hover:bg-gray-600">
+          Cancel
+        </button>
+      </div>
+    </div>
+  `;
+  
+  document.body.appendChild(modal);
+  
+  // Add listeners for preview
+  const amtInput = document.getElementById('itemDiscountAmount');
+  const typeSelect = document.getElementById('itemDiscountType');
+  const preview = document.getElementById('itemDiscPreview');
+  
+  function updatePreview() {
+    const amt = parseFloat(amtInput.value) || 0;
+    const type = typeSelect.value;
+    const itemTotal = item.price * item.qty;
+    let discValue = 0;
+    
+    if (type === 'percent') {
+      discValue = (itemTotal * amt) / 100;
+      preview.textContent = `Discount: ${amt}% = ${formatLKR(discValue)}`;
+    } else {
+      discValue = amt;
+      preview.textContent = `Discount: ${formatLKR(discValue)}`;
+    }
+    preview.textContent += ` | Net: ${formatLKR(itemTotal - discValue)}`;
+  }
+  
+  amtInput.oninput = updatePreview;
+  typeSelect.onchange = updatePreview;
+  updatePreview();
+}
+
+window.applyItemDiscount = (index) => {
+  const amt = parseFloat(document.getElementById('itemDiscountAmount').value) || 0;
+  const type = document.getElementById('itemDiscountType').value;
+  const item = cart[index];
+  
+  if (type === 'percent') {
+    cart[index].discount = (item.price * item.qty * amt) / 100;
+  } else {
+    cart[index].discount = amt;
+  }
+  
+  closeItemDiscountModal();
+  updateCart();
+  beep();
+};
+
+window.closeItemDiscountModal = () => {
+  const modal = document.getElementById('itemDiscountModal');
+  if (modal) modal.remove();
+};
+
+// Cart discount modal
+window.showCartDiscountModal = () => {
+  const modal = document.createElement('div');
+  modal.id = 'cartDiscountModal';
+  modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
+  
+  const currentDiscount = parseFloat(document.getElementById('discountAmount').value) || 0;
+  const currentType = document.getElementById('discountType').value || 'fixed';
+  
+  modal.innerHTML = `
+    <div class="bg-white p-8 rounded-3xl shadow-2xl max-w-md w-full mx-4">
+      <h2 class="text-2xl font-bold mb-6 text-indigo-700">Cart Discount</h2>
+      <div class="mb-4">
+        <label class="block text-sm font-bold mb-2">Subtotal: <span id="modalSubtotal">LKR 0.00</span></label>
+        <input type="number" id="cartDiscountAmount" placeholder="Discount Amount" class="w-full p-4 border-2 rounded-xl text-lg mb-3" step="0.01" min="0" value="${currentDiscount}"/>
+        <select id="cartDiscountType" class="w-full p-4 border-2 rounded-xl text-lg mb-3">
+          <option value="fixed" ${currentType === 'fixed' ? 'selected' : ''}>Fixed Amount (LKR)</option>
+          <option value="percent" ${currentType === 'percent' ? 'selected' : ''}>Percentage (%)</option>
+        </select>
+        <div id="cartDiscPreview" class="text-lg font-bold text-green-600 mb-4"></div>
+      </div>
+      <div class="flex gap-3">
+        <button onclick="applyCartDiscount()" class="flex-1 bg-green-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-green-700">
+          <i class="fas fa-check mr-2"></i>Apply
+        </button>
+        <button onclick="removeCartDiscount()" class="flex-1 bg-red-500 text-white px-6 py-3 rounded-xl font-bold hover:bg-red-600">
+          Remove
+        </button>
+        <button onclick="closeCartDiscountModal()" class="flex-1 bg-gray-500 text-white px-6 py-3 rounded-xl font-bold hover:bg-gray-600">
+          Cancel
+        </button>
+      </div>
+    </div>
+  `;
+  
+  document.body.appendChild(modal);
+  
+  // Calculate and show subtotal
+  const subtotal = cart.reduce((sum, item) => sum + (item.price * item.qty - (item.discount || 0)), 0);
+  document.getElementById('modalSubtotal').textContent = formatLKR(subtotal);
+  
+  // Add listeners for preview
+  const amtInput = document.getElementById('cartDiscountAmount');
+  const typeSelect = document.getElementById('cartDiscountType');
+  const preview = document.getElementById('cartDiscPreview');
+  
+  function updatePreview() {
+    const amt = parseFloat(amtInput.value) || 0;
+    const type = typeSelect.value;
+    let discValue = 0;
+    
+    if (type === 'percent') {
+      discValue = (subtotal * amt) / 100;
+      preview.textContent = `Discount: ${amt}% = ${formatLKR(discValue)}`;
+    } else {
+      discValue = amt;
+      preview.textContent = `Discount: ${formatLKR(discValue)}`;
+    }
+    preview.textContent += ` | Total: ${formatLKR(subtotal - discValue)}`;
+  }
+  
+  amtInput.oninput = updatePreview;
+  typeSelect.onchange = updatePreview;
+  updatePreview();
+};
+
+window.applyCartDiscount = () => {
+  const amt = parseFloat(document.getElementById('cartDiscountAmount').value) || 0;
+  const type = document.getElementById('cartDiscountType').value;
+  
+  document.getElementById('discountAmount').value = amt;
+  document.getElementById('discountType').value = type;
+  
+  closeCartDiscountModal();
+  updateCart();
+  beep();
+};
+
+window.removeCartDiscount = () => {
+  document.getElementById('discountAmount').value = 0;
+  document.getElementById('discountType').value = 'fixed';
+  closeCartDiscountModal();
+  updateCart();
+  beep();
+};
+
+window.closeCartDiscountModal = () => {
+  const modal = document.getElementById('cartDiscountModal');
+  if (modal) modal.remove();
+};
+
 // Clear cart function
 window.clearCart = () => {
   if (cart.length === 0) return;
@@ -528,14 +708,10 @@ document.addEventListener("keydown", (e) => {
     document.getElementById("cashTendered").select();
   }
   
-  // F3 - Focus discount input
+  // F3 - Show cart discount modal
   if (e.key === "F3") {
     e.preventDefault();
-    const discountInput = document.getElementById("discountAmount");
-    if (discountInput) {
-      discountInput.focus();
-      discountInput.select();
-    }
+    window.showCartDiscountModal();
   }
   
   // F4 - Focus first quantity input in cart
@@ -724,8 +900,11 @@ window.completeSale = async () => {
     
     // Save to Firebase (online) or IndexedDB (offline)
     if (isOffline && offlineDB.db) {
-      // Save to offline database
+      // Save to offline database (optimized - no extra queries)
+      const offlineSaveStart = Date.now();
       await offlineDB.saveSale(sale);
+      const offlineSaveTime = Date.now() - offlineSaveStart;
+      console.log(`Offline save completed in ${offlineSaveTime}ms`);
       alert(`Sale saved offline!\nTransaction ID: ${transactionId}\n\n⚠️ Will sync to server when online\nChange: ${formatLKR(tendered - total)}`);
     } else {
       // Save to Firebase
@@ -737,8 +916,18 @@ window.completeSale = async () => {
     
     cart = [];
     document.getElementById("cashTendered").value = "";
-    if (document.getElementById("discountAmount")) document.getElementById("discountAmount").value = "";
+    document.getElementById("discountAmount").value = "0";
     updateCart();
+    
+    // Re-enable and focus cash tendered input
+    setTimeout(() => {
+      const cashInput = document.getElementById("cashTendered");
+      if (cashInput) {
+        cashInput.disabled = false;
+        cashInput.focus();
+      }
+    }, 100);
+    
     beep(); beep(); beep();
   } catch (error) {
     alert("Error completing sale: " + error.message);
@@ -749,7 +938,7 @@ window.completeSale = async () => {
     if (completeBtn) {
       completeBtn.disabled = false;
       completeBtn.style.opacity = "1";
-      completeBtn.innerHTML = '<i class="fas fa-check-circle mr-3"></i>COMPLETE SALE<div class="text-sm font-normal mt-2 opacity-75">(Press F9 or Ctrl+Enter)</div>';
+      completeBtn.innerHTML = '<i class="fas fa-check-circle mr-2"></i>COMPLETE SALE<div class="text-xs font-normal mt-1 opacity-75">(Press F9 or Ctrl+Enter)</div>';
     }
   }
 };

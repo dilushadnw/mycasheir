@@ -10,10 +10,17 @@
     <h2 class="text-2xl md:text-3xl font-bold mb-6">Add New Product</h2>
     
     <!-- Basic Product Info -->
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
       <input id="name" placeholder="Product Name *" class="p-4 border-2 rounded-xl text-lg" required/>
       <input id="barcode" placeholder="Barcode (scan or type)" class="p-4 border-2 rounded-xl text-lg" autofocus/>
       <input id="category" placeholder="Category" class="p-4 border-2 rounded-xl text-lg"/>
+      <select id="unit" class="p-4 border-2 rounded-xl text-lg">
+        <option value="">Unit: Pieces (default)</option>
+        <option value="kg">Kilogram (kg)</option>
+        <option value="g">Gram (g)</option>
+        <option value="l">Liter (l)</option>
+        <option value="ml">Milliliter (ml)</option>
+      </select>
     </div>
     
     <!-- Pricing & Stock Info -->
@@ -138,9 +145,10 @@ window.addProduct = async () => {
   const name = document.getElementById("name").value.trim();
   const barcode = document.getElementById("barcode").value.trim();
   const category = document.getElementById("category").value.trim();
+  const unit = document.getElementById("unit").value;
   const buyingPrice = parseFloat(document.getElementById("buyingPrice").value);
   const sellingPrice = parseFloat(document.getElementById("sellingPrice").value);
-  const stock = parseInt(document.getElementById("stock").value);
+  const stock = parseFloat(document.getElementById("stock").value); // Changed to parseFloat for weight support
   const freeItems = parseInt(document.getElementById("freeItems").value) || 0;
   const purchaseDate = document.getElementById("purchaseDate").value;
   const supplierName = document.getElementById("supplierName").value.trim();
@@ -173,6 +181,7 @@ window.addProduct = async () => {
           sellingPrice: sellingPrice,
           price: sellingPrice, // Keep for backward compatibility
           category: category || existingData.category || "",
+          unit: unit || existingData.unit || "",
           freeItems: (existingData.freeItems || 0) + freeItems,
           lastPurchaseDate: purchaseDate || new Date().toISOString().split('T')[0],
           lastSupplier: supplierName || existingData.lastSupplier || ""
@@ -197,6 +206,7 @@ window.addProduct = async () => {
             name, 
             barcode: barcode || "",
             category: category || "",
+            unit: unit || "",
             buyingPrice,
             sellingPrice,
             price: sellingPrice, // For backward compatibility
@@ -238,6 +248,7 @@ window.addProduct = async () => {
         name, 
         barcode: barcode || "",
         category: category || "",
+        unit: unit || "",
         buyingPrice,
         sellingPrice,
         price: sellingPrice, // For backward compatibility  
